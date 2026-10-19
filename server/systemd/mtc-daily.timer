@@ -1,0 +1,9 @@
+[Unit]
+Description=Chennai One daily harvest at 05:30 IST (00:00 UTC), before buses start
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

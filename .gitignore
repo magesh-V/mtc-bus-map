@@ -1,0 +1,6 @@
+session.env
+web/live/
+server/archive/
+server/fares/
+__pycache__/
+.DS_Store

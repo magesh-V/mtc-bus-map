@@ -1,0 +1,12 @@
+[Unit]
+Description=Chennai One daily harvest: new network snapshots + the day's bus roster
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/mtc-live
+EnvironmentFile=%h/projects/mtc-live/session.env
+ExecStart=/usr/bin/python3 daily_harvest.py --out %h/projects/mtc-live --rate 2
+Nice=10
+StandardOutput=append:%h/projects/mtc-live/logs/daily.log
+StandardError=append:%h/projects/mtc-live/logs/daily.log

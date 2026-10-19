@@ -1,0 +1,12 @@
+[Unit]
+Description=Chennai One fare harvest (every class, every planned stop pair) -> mtc-live/fares
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/mtc-live
+EnvironmentFile=%h/projects/mtc-live/session.env
+ExecStart=/usr/bin/python3 fare_harvest.py fare_plan_20261017.json %h/projects/mtc-live/fares --rate 2
+Nice=10
+StandardOutput=append:%h/projects/mtc-live/logs/fares.log
+StandardError=append:%h/projects/mtc-live/logs/fares.log

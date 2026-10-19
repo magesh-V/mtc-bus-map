@@ -1,0 +1,10 @@
+[Unit]
+Description=MTC observed bus speeds per road segment -> mapsv2/live/speeds.json
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/mtc-live
+ExecStart=/usr/bin/python3 live_speeds.py --stops %h/projects/maps-site/mapsv2/data/route_stops.json --archive %h/projects/mtc-live/archive --out %h/projects/maps-site/mapsv2/live/speeds.json
+Nice=10
+StandardOutput=append:%h/projects/mtc-live/logs/speeds.log
+StandardError=append:%h/projects/mtc-live/logs/speeds.log
