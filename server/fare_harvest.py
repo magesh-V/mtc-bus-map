@@ -23,7 +23,9 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from live_collector import api, log  # noqa: E402
@@ -35,6 +37,7 @@ def main():
     ap.add_argument('out')
     ap.add_argument('--rate', type=float, default=2)
     ap.add_argument('--types', default='METRO,SUBWAY,BUS')
+    ap.add_argument('--workers', type=int, default=1)
     a = ap.parse_args()
     plan = json.load(open(a.plan))
     os.makedirs(a.out, exist_ok=True)
@@ -51,29 +54,44 @@ def main():
         todo = [(r['route'], r['ibc'], p[0], p[1]) for r in plan.get(vt, []) for p in r['pairs']
                 if (r['route'], p[0], p[1]) not in done]
         log(f'{vt}: {len(done)} held, {len(todo)} to fetch')
-        fails = auth = 0
-        with open(path, 'a') as fh:
-            for n, (route, ibc, s0, s1) in enumerate(todo, 1):
-                time.sleep(1 / a.rate)
-                body = {'fromStationCode': s0, 'toStationCode': s1, 'quantity': 1, 'routeCode': route}
-                c, j = api(f'/frfs/search?vehicleType="{vt}"&integratedBppConfigId={ibc}&', body)
+        st = {'fails': 0, 'auth': 0, 'n': 0}
+        lock, gap = threading.Lock(), 1 / a.rate
+        nxt = [time.monotonic()]
+
+        def one(item):
+            route, ibc, s0, s1 = item
+            if st['auth'] > 20:
+                return
+            with lock:                                  # shared rate limit across workers
+                t = max(time.monotonic(), nxt[0]); nxt[0] = t + gap
+            time.sleep(max(0, t - time.monotonic()))
+            body = {'fromStationCode': s0, 'toStationCode': s1, 'quantity': 1}
+            if route:                                   # metro interchange journeys have no single route
+                body['routeCode'] = route
+            c, j = api(f'/frfs/search?vehicleType="{vt}"&integratedBppConfigId={ibc}&', body)
+            with lock:
                 if c in (401, 403):
-                    auth += 1
-                    if auth > 20:
-                        log('session rejected — stopping; rerun after refreshing session.env')
-                        return
-                    continue
+                    st['auth'] += 1
+                    return
                 if c != 200 or not j:
-                    fails += 1
-                    continue
-                auth = 0
+                    st['fails'] += 1
+                    return
+                st['auth'] = 0
                 q = [[x.get('serviceTierType'), x.get('serviceTierName'), x.get('price'),
                       {cat['categoryName']: (cat.get('categoryPrice') or {}).get('amount') for cat in x.get('categories') or []}]
                      for x in j.get('quotes') or [] if (x.get('routeCode') in (None, route))]
                 fh.write(json.dumps({'vt': vt, 'route': route, 'from': s0, 'to': s1, 'q': q}, separators=(',', ':')) + '\n')
-                if n % 1000 == 0:
+                st['n'] += 1
+                if st['n'] % 500 == 0:
                     fh.flush()
-                    log(f'{vt}: {n}/{len(todo)} ({fails} failed)')
+                    log(f"{vt}: {st['n']}/{len(todo)} ({st['fails']} failed)")
+
+        with open(path, 'a') as fh, ThreadPoolExecutor(a.workers) as ex:
+            list(ex.map(one, todo))
+        if st['auth'] > 20:
+            log('session rejected — stopping; rerun after refreshing session.env')
+            return
+        fails = st['fails']
         log(f'{vt}: done, {fails} failed')
 
 

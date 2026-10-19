@@ -33,7 +33,7 @@ server/    runs on the web host
                            archives every GPS fix and the road speed between fixes
   live_speeds.py           per-segment speed medians -> live/speeds.json (every 10 min)
   daily_harvest.py         new network snapshots + the day's bus roster (05:30 IST)
-  fare_harvest.py          every class's fare per stop pair
+  fare_harvest.py          every class's fare per stop pair (/frfs/search quotes all classes at once)
   harvest_fast.py api.py   timetable harvest for a new snapshot
   live_sweep.py            one raw fleet-wide capture
   systemd/                 the units as deployed (user services; %h = home)
@@ -42,6 +42,7 @@ pipeline/  snapshot -> GTFS + map layers
   build_gtfs_clean.py      GTFS for MTC / CMRL / suburban
   snap_routes.py snap_rail.py   road and track matching
   build_map_layers.py build_timings.py build_live_assets.py build_pr_bundle.py
+  build_fare_tables.py     fare tables published in ChennaiGTFS data/chennai-one/fares
 ```
 
 ## Running it
