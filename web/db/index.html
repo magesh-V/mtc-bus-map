@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MTC, measured</title>
+<meta name="description" content="Chennai's MTC buses from their own GPS: how many are on the road, how fast they move, where they bunch, when they crowd.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+  :root {
+    --paper: #f9f5ed; --raised: #fffdf8; --sunken: #efe9dd; --ink: #1c1c1e; --soft: #5b5a57; --faint: #96938c;
+    --hair: rgba(28, 28, 30, .12); --red: #f01b48; --amber: #e0a100; --green: #2fa35a; --blue: #2c62b8; --purple: #5a2ad0;
+    --day: #e09400; --night: #3d33a0;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --paper: #101316; --raised: #171b1f; --sunken: #0b0d10; --ink: #ecebe6; --soft: #b0afaa; --faint: #74726c; --hair: rgba(236, 235, 230, .14);
+  } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: 'Schibsted Grotesk', -apple-system, 'Segoe UI', sans-serif; }
+  body { padding: 0 16px 64px; }
+  a { color: var(--red); }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { padding: 34px 0 10px; display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: flex-end; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .badge { width: 44px; height: 44px; border-radius: 13px; background: var(--red); display: grid; place-items: center; color: #fff; flex: none; }
+  h1 { margin: 0; font-size: clamp(28px, 5vw, 42px); font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+  .lede { margin: 6px 0 0; color: var(--soft); font-size: 15px; max-width: 640px; line-height: 1.45; }
+  .stamp { color: var(--faint); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+  .stamp a { font-weight: 600; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 22px 0 8px; }
+  .kpi { background: var(--raised); border: 1px solid var(--hair); border-radius: 14px; padding: 13px 14px 12px; }
+  .kpi b { display: block; font-size: 26px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .kpi span { font-size: 12px; color: var(--soft); }
+  section { margin-top: 34px; }
+  h2 { font-size: 21px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .sub { color: var(--soft); font-size: 14px; margin: 0 0 14px; max-width: 760px; line-height: 1.45; }
+  .card { background: var(--raised); border: 1px solid var(--hair); border-radius: 16px; padding: 16px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+  .cap { color: var(--faint); font-size: 11.5px; margin-top: 10px; line-height: 1.4; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--soft); margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+  svg.chart text { fill: var(--faint); font-size: 10.5px; font-family: inherit; }
+  svg.chart .lbl { fill: var(--ink); font-weight: 700; font-size: 11px; }
+  .grid-line { stroke: var(--hair); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 700; padding: 6px 8px; border-bottom: 1px solid var(--hair); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--hair); vertical-align: top; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tag { display: inline-block; background: var(--blue); color: #fff; font-weight: 700; font-size: 11px; padding: 1px 6px; border-radius: 5px; margin: 0 3px 2px 0; }
+  .scroll { overflow-x: auto; }
+  #map { height: 430px; border-radius: 14px; overflow: hidden; border: 1px solid var(--hair); }
+  .tabs { display: inline-flex; background: var(--sunken); border-radius: 10px; padding: 3px; margin-bottom: 10px; }
+  .tabs button { border: 0; background: none; padding: 6px 12px; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600; color: var(--soft); cursor: pointer; }
+  .tabs button.on { background: var(--raised); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .note { background: var(--sunken); border-radius: 12px; padding: 12px 14px; font-size: 13px; color: var(--soft); line-height: 1.5; }
+  .tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 12px; padding: 6px 9px; border-radius: 8px; z-index: 10; display: none; font-variant-numeric: tabular-nums; }
+  footer { margin-top: 40px; color: var(--faint); font-size: 12.5px; line-height: 1.55; }
+  @media (max-width: 560px) { body { padding: 0 12px 48px; } .kpi b { font-size: 22px; } #map { height: 340px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="brand">
+        <div class="badge"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6v6M15 6v6M2 12h19.6M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/></svg></div>
+        <h1>MTC, measured</h1>
+      </div>
+      <p class="lede">Chennai's city buses from their own GPS: how many are on the road, how fast they move, where they bunch, and when they are likely to be crowded.</p>
+    </div>
+    <div class="stamp" id="stamp">loading…</div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <section>
+    <h2>On the road</h2>
+    <p class="sub">Distinct buses reporting their position, by hour of the day, averaged over the days collected. Electric and AC buses are part of the total.</p>
+    <div class="card"><div class="legend"><span><i style="background:var(--faint)"></i>All buses</span><span><i style="background:var(--purple)"></i>Electric</span><span><i style="background:var(--blue)"></i>AC</span></div>
+      <svg class="chart" id="c-fleet"></svg><div class="cap" id="cap-fleet"></div></div>
+  </section>
+
+  <section>
+    <h2>How fast buses move</h2>
+    <p class="sub">Observed speed: the road distance a bus covers along its own route between two GPS fixes, over the time between them — stops and signals included, so this is the speed a rider gets. Parked and laid-over buses are left out.</p>
+    <div class="grid2">
+      <div class="card"><div class="legend"><span><i style="background:var(--red)"></i>City median speed by hour (km/h)</span></div><svg class="chart" id="c-speed"></svg></div>
+      <div class="card"><div class="legend"><span><i style="background:var(--ink)"></i>How often each speed is seen (km/h)</span></div><svg class="chart" id="c-hist"></svg></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Where it is slowest, and where buses bunch</h2>
+    <p class="sub">Red lines: the slowest stop-to-stop stretches at the peaks (8–11 am, 5–8 pm). Circles: where buses of the same route were caught nose-to-tail.</p>
+    <div class="tabs" id="maptabs"><button data-l="both" class="on">Both</button><button data-l="slow">Slow corridors</button><button data-l="bunch">Bunching</button></div>
+    <div id="map"></div>
+  </section>
+
+  <section>
+    <h2>Slowest corridors at the peaks</h2>
+    <div class="card scroll"><table id="t-slow"></table><div class="cap">Median peak-hour bus speed on each stretch, with the number of bus passes measured and the routes that use it. Stretches next to a route's terminus are excluded, so layovers do not read as jams.</div></div>
+  </section>
+
+  <section>
+    <h2>Bus bunching</h2>
+    <p class="sub" id="bunch-sub"></p>
+    <div class="grid2">
+      <div class="card"><div class="legend"><span><i style="background:var(--red)"></i>Bunched (&lt; 250 m apart)</span><span><i style="background:var(--amber)"></i>Close (&lt; 500 m)</span></div>
+        <svg class="chart" id="c-bunch"></svg><div class="cap">Share of consecutive buses on the same working that were that close, by hour.</div></div>
+      <div class="card scroll"><table id="t-bunch-routes"></table></div>
+    </div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="card scroll"><table id="t-hot"></table></div>
+      <div class="card scroll"><table id="t-recent"></table></div>
+    </div>
+    <div class="note" style="margin-top:12px" id="bunch-method"></div>
+  </section>
+
+  <section>
+    <h2>When buses are likely to be crowded</h2>
+    <p class="sub">MTC does not publish ticket counts by hour, and the Chennai One app's crowd field is empty. What is real and hourly: when the city travels — Chennai Metro's ticket entries by hour — and how many buses are on the road. Their ratio says when there are the fewest buses per traveller. An estimate, not a passenger count.</p>
+    <div class="card"><div class="legend"><span><i style="background:var(--faint)"></i>Share of the day's travel (CMRL tickets)</span><span><i style="background:var(--red)"></i>Crowding index (travel share ÷ bus share)</span></div>
+      <svg class="chart" id="c-crowd"></svg><div class="cap" id="cap-crowd"></div></div>
+  </section>
+
+  <section>
+    <h2>Today's roster</h2>
+    <p class="sub">Today's trips that already had a bus rostered to them when Chennai One was read at 05:30 — a snapshot of the duty roster, not every trip of the day.</p>
+    <div class="grid2">
+      <div class="card"><div id="roster-kpis" class="kpis" style="margin:0"></div><svg class="chart" id="c-tier" style="margin-top:14px"></svg></div>
+      <div class="card"><div class="legend"><span><i style="background:var(--ink)"></i>Buses by trips they run today</span></div><svg class="chart" id="c-tpb"></svg></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Fares</h2>
+    <p class="sub">From Chennai One's own fare search, every stop pair of every working (75,257 quotes). Every class is a fixed function of the Ordinary fare, which rises ₹1 a stage.</p>
+    <div class="card"><div class="legend"><span><i style="background:var(--green)"></i>Ordinary</span><span><i style="background:var(--amber)"></i>Express</span><span><i style="background:var(--purple)"></i>Deluxe</span><span><i style="background:var(--blue)"></i>AC</span></div>
+      <svg class="chart" id="c-fare"></svg><div class="cap">Fare in rupees by fare stage from the boarding stop. Data: <a href="https://github.com/reclaimchennai/ChennaiGTFS/tree/chennai-one-feeds/data/chennai-one/fares">ChennaiGTFS fares</a>.</div></div>
+  </section>
+
+  <footer>
+    <p><b>How this is collected.</b> A collector polls Chennai One for every running route at 4 requests a second and archives each bus's GPS fix; this page is rebuilt from that archive every hour. Speeds and bunching need two fixes of the same bus, a few minutes apart. Buses that do not report GPS are not counted.</p>
+    <p>Data: CUMTA / MTC via the Chennai One app; CMRL Commuter Archive for travel by hour. Code and data: <a href="https://github.com/reclaimchennai/mtc-bus-map">reclaimchennai/mtc-bus-map</a> · Live map: <a href="../">mtc.reclaimchennai.city</a> · By <a href="https://reclaimchennai.city">Reclaim Chennai</a>.</p>
+  </footer>
+</div>
+<div class="tip" id="tip"></div>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const fmt = n => n == null ? '—' : Math.round(n).toLocaleString('en-IN');
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const H2 = h => String(h).padStart(2, '0');
+const tip = $('tip');
+function hover(el, html) {
+  el.addEventListener('mousemove', e => { tip.innerHTML = html; tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 30) + 'px'; });
+  el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+}
+const NS = 'http://www.w3.org/2000/svg';
+function S(tag, at, txt) { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (txt != null) e.textContent = txt; return e; }
+
+/* bars by hour: series = [{vals[24], color, label}], overlaid (first is the back) */
+function hourBars(svg, series, { h = 200, unit = '', max, W = 720 } = {}) {
+  const m = { l: 34, r: 8, t: 10, b: 22 };
+  svg.setAttribute('viewBox', `0 0 ${W} ${h}`); svg.innerHTML = '';
+  const all = series.flatMap(s => s.vals.filter(v => v != null));
+  const top = max || Math.max(1, ...all) * 1.08, bw = (W - m.l - m.r) / 24;
+  const y = v => m.t + (h - m.t - m.b) * (1 - v / top);
+  for (let k = 0; k <= 4; k++) { const v = top * k / 4; svg.append(S('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: 'grid-line' })); svg.append(S('text', { x: m.l - 6, y: y(v) + 3.5, 'text-anchor': 'end' }, unit === '%' ? Math.round(v) + '%' : Math.round(v).toLocaleString('en-IN'))); }
+  series.forEach((s, si) => s.vals.forEach((v, hr) => {
+    // slot 0: full width; slots 1 and 2: side by side within the bar
+    const sl = s.slot || 0, x = m.l + hr * bw + bw * (sl === 2 ? 0.5 : 0.12), w = bw * (sl ? 0.38 : 0.76);
+    if (v == null) { if (si === 0) svg.append(S('rect', { x, y: h - m.b - 3, width: w, height: 3, fill: css('--hair') })); return; }
+    const r = S('rect', { x, y: y(v), width: w, height: Math.max(0, h - m.b - y(v)), rx: 3, fill: s.color, opacity: s.opacity || 1 });
+    hover(r, `${H2(hr)}:00 · ${s.label}: <b>${unit === '%' ? v.toFixed(1) + '%' : fmt(v) + (unit ? ' ' + unit : '')}</b>`);
+    svg.append(r);
+  }));
+  for (let hr = 0; hr < 24; hr += 3) svg.append(S('text', { x: m.l + hr * bw + bw / 2, y: h - 6, 'text-anchor': 'middle' }, H2(hr)));
+}
+function lineByHour(svg, vals, { h = 200, color = css('--red'), unit = 'km/h', min = 0, W = 720 } = {}) {
+  const m = { l: 34, r: 8, t: 12, b: 22 };
+  svg.setAttribute('viewBox', `0 0 ${W} ${h}`); svg.innerHTML = '';
+  const ok = vals.filter(v => v != null), top = Math.max(...ok) * 1.12, bot = min;
+  const x = hr => m.l + (W - m.l - m.r) * (hr + .5) / 24, y = v => m.t + (h - m.t - m.b) * (1 - (v - bot) / (top - bot));
+  for (let k = 0; k <= 4; k++) { const v = bot + (top - bot) * k / 4; svg.append(S('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: 'grid-line' })); svg.append(S('text', { x: m.l - 6, y: y(v) + 3.5, 'text-anchor': 'end' }, Math.round(v))); }
+  let d = '', pen = false;
+  vals.forEach((v, hr) => { if (v == null || v < 3) { pen = false; return; } d += `${pen ? 'L' : 'M'}${x(hr)} ${y(v)}`; pen = true; });
+  svg.append(S('path', { d, fill: 'none', stroke: color, 'stroke-width': 2.5, 'stroke-linejoin': 'round' }));
+  vals.forEach((v, hr) => { if (v == null || v < 3) return; const c = S('circle', { cx: x(hr), cy: y(v), r: 4, fill: color }); hover(c, `${H2(hr)}:00 · <b>${v} ${unit}</b>`); svg.append(c); });
+  for (let hr = 0; hr < 24; hr += 3) svg.append(S('text', { x: x(hr), y: h - 6, 'text-anchor': 'middle' }, H2(hr)));
+}
+function plainBars(svg, labels, vals, { h = 200, color = css('--ink'), fmtv = fmt, labelEvery = 1, W = 720 } = {}) {
+  const m = { l: 34, r: 8, t: 14, b: 22 }, n = vals.length, bw = (W - m.l - m.r) / n;
+  svg.setAttribute('viewBox', `0 0 ${W} ${h}`); svg.innerHTML = '';
+  const top = Math.max(1, ...vals) * 1.1, y = v => m.t + (h - m.t - m.b) * (1 - v / top);
+  vals.forEach((v, i) => {
+    const r = S('rect', { x: m.l + i * bw + bw * .12, y: y(v), width: bw * .76, height: h - m.b - y(v), rx: 3, fill: Array.isArray(color) ? color[i] : color });
+    hover(r, `${labels[i]} · <b>${fmtv(v)}</b>`); svg.append(r);
+    if (i % labelEvery === 0) svg.append(S('text', { x: m.l + i * bw + bw / 2, y: h - 6, 'text-anchor': 'middle' }, labels[i]));
+  });
+}
+
+fetch('data.json?t=' + Math.floor(Date.now() / 600000)).then(r => r.json()).then(D => {
+  const cov = D.coverage, B = D.bunching, SP = D.speeds;
+  const days = D.days;
+  $('stamp').innerHTML = `Updated ${D.generated.slice(0, 16).replace('T', ' ')} IST<br>${days.length} day${days.length === 1 ? '' : 's'} of GPS: ${days[0]} – ${days[days.length - 1]}<br><a href="../">Live map →</a>`;
+  const peakFleet = Math.max(...D.fleet_by_hour.map(f => f[0]));
+  const kp = [[fmt(cov.buses), 'distinct buses tracked'], [fmt(peakFleet), 'on the road in the busiest hour'], [fmt(cov.fixes), 'GPS fixes archived'],
+    [SP.median + ' km/h', 'median bus speed'], [(100 * B.total_bunched / Math.max(1, B.total_pairs)).toFixed(1) + '%', 'of moving bus pairs bunched'], [fmt(cov.routes), 'workings seen running']];
+  $('kpis').innerHTML = kp.map(([b, s]) => `<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+
+  const F = D.fleet_by_hour;
+  hourBars($('c-fleet'), [
+    { vals: F.map(f => f[0] || null), color: css('--faint'), label: 'All buses', opacity: .55 },
+    { vals: F.map(f => f[2] || null), color: css('--blue'), label: 'AC', slot: 1 },
+    { vals: F.map(f => f[1] || null), color: css('--purple'), label: 'Electric', slot: 2 }]);
+  const gaps = F.map((f, h) => f[0] ? null : H2(h)).filter(Boolean);
+  $('cap-fleet').textContent = gaps.length ? `Hours not yet collected: ${gaps.join(', ')}. The archive grows every day and this fills in.` : '';
+
+  lineByHour($('c-speed'), SP.city_by_hour, { W: 420, h: 230 });
+  plainBars($('c-hist'), SP.hist_4kmh.map((_, i) => `${i * 4}`), SP.hist_4kmh, { labelEvery: 2, fmtv: v => fmt(v) + ' passes', W: 420, h: 230 });
+
+  $('t-slow').innerHTML = '<tr><th>Stretch</th><th>Routes</th><th class="n">Peak km/h</th><th class="n">All-day</th><th class="n">Passes</th></tr>'
+    + SP.slowest_peak.slice(0, 20).map(s => `<tr><td>${s[3]} → ${s[4]}</td><td>${s[9].map(r => `<span class="tag">${r}</span>`).join('')}</td><td class="n"><b>${s[0]}</b></td><td class="n">${s[2]}</td><td class="n">${s[1]}</td></tr>`).join('');
+
+  const rate = B.by_hour.map(x => x[0] >= 30 ? 100 * x[1] / x[0] : null), near = B.by_hour.map(x => x[0] >= 30 ? 100 * x[2] / x[0] : null);
+  hourBars($('c-bunch'), [{ vals: near, color: css('--amber'), label: 'Close', opacity: .55 }, { vals: rate, color: css('--red'), label: 'Bunched' }], { unit: '%', W: 420, h: 240 });
+  $('bunch-sub').innerHTML = `When two buses of the same route arrive together, riders wait twice as long for the next one. Of <b>${fmt(B.total_pairs)}</b> pairs of consecutive moving buses on the same working, <b>${fmt(B.total_bunched)}</b> (${(100 * B.total_bunched / Math.max(1, B.total_pairs)).toFixed(1)}%) were less than ${B.rule.bunch_m} m apart.`;
+  $('t-bunch-routes').innerHTML = '<tr><th>Route</th><th>Working</th><th class="n">Bunched</th><th class="n">Pairs</th></tr>'
+    + B.top_routes.slice(0, 12).map(r => `<tr><td><span class="tag">${r[0]}</span></td><td>${r[2]}</td><td class="n"><b>${r[5]}%</b></td><td class="n">${r[3]}</td></tr>`).join('');
+  $('t-hot').innerHTML = '<tr><th>Where buses bunch</th><th>Routes</th><th class="n">Cases</th></tr>'
+    + B.hotspots.slice(0, 12).map(h => `<tr><td>${h[0]}</td><td>${h[4].map(r => `<span class="tag">${r}</span>`).join('')}</td><td class="n"><b>${h[1]}</b></td></tr>`).join('');
+  $('t-recent').innerHTML = '<tr><th>Latest cases</th><th>Route</th><th>Buses</th><th class="n">Gap</th></tr>'
+    + B.recent.slice(0, 12).map(c => `<tr><td>${c[0]}<br><span style="color:var(--soft)">${c[3]}</span></td><td><span class="tag">${c[1]}</span></td><td>${c[4]}<br>${c[5]}</td><td class="n">${c[6]} m</td></tr>`).join('');
+  $('bunch-method').innerHTML = `<b>How bunching is counted.</b> Each poll returns all the buses of one working at once. Ordered along the route, two consecutive buses less than ${B.rule.bunch_m} m apart are bunched (${B.rule.near_m} m: close). Both must have advanced at least 100 m along the route since their previous fix, so parked and waiting buses do not count; buses within ${B.rule.terminus_m} m of either terminus are left out (queues there are layovers), as are workings scheduled more often than every ${B.rule.min_headway} minutes, where buses are close by design.`;
+
+  const C = D.crowding;
+  const cw = C.index_by_hour;
+  hourBars($('c-crowd'), [{ vals: C.demand_profile.map(v => v ? v : null), color: css('--faint'), label: 'Share of the day\'s travel %', opacity: .5 }], { unit: '%', max: Math.max(...C.demand_profile) * 1.15 });
+  // overlay the crowding index as a line on its own scale
+  (() => {
+    const svg = $('c-crowd'), W = 720, h = 200, m = { l: 34, r: 8, t: 10, b: 22 }, top = Math.max(1.5, ...cw.filter(v => v != null)) * 1.1;
+    const x = hr => m.l + (W - m.l - m.r) * (hr + .5) / 24, y = v => m.t + (h - m.t - m.b) * (1 - v / top);
+    svg.append(S('line', { x1: m.l, x2: W - m.r, y1: y(1), y2: y(1), stroke: css('--red'), 'stroke-dasharray': '4 4', opacity: .5 }));
+    svg.append(S('text', { x: W - m.r, y: y(1) - 4, 'text-anchor': 'end', fill: css('--red') }, '1 = average'));
+    let d = '', pen = false;
+    cw.forEach((v, hr) => { if (v == null || !C.demand_profile[hr]) { pen = false; return; } d += `${pen ? 'L' : 'M'}${x(hr)} ${y(v)}`; pen = true; });
+    svg.append(S('path', { d, fill: 'none', stroke: css('--red'), 'stroke-width': 2.5 }));
+    cw.forEach((v, hr) => { if (v == null || !C.demand_profile[hr]) return; const c = S('circle', { cx: x(hr), cy: y(v), r: 4, fill: css('--red') }); hover(c, `${H2(hr)}:00 · crowding index <b>${v}</b>`); svg.append(c); });
+  })();
+  const pk = cw.map((v, h) => [v, h]).filter(([v]) => v != null).sort((a, b) => b[0] - a[0]).slice(0, 2).map(([, h]) => H2(h) + ':00');
+  $('cap-crowd').textContent = `Most crowded hours by this measure: ${pk.join(' and ')}. Travel profile: weekday average over ${C.cmrl_days} days of CMRL ticket entries. Above 1, there are fewer buses on the road per traveller than over the day as a whole. The live map shows the same estimate per route.`;
+
+  const R = D.roster;
+  if (R) {
+    $('roster-kpis').innerHTML = [[fmt(R.trips), 'trips with a bus assigned'], [fmt(R.buses), 'buses rostered'], [Math.round(100 * R.electric_trips / R.trips) + '%', 'of trips on electric buses'], [Math.round(100 * R.low_floor_trips / R.trips) + '%', 'on low-floor buses']]
+      .map(([b, s]) => `<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
+    const tn = { ORDINARY: 'Ordinary', EXECUTIVE: 'Deluxe', AC: 'AC', EXPRESS: 'Express', PREMIUM: 'Premium', SPECIAL: 'Small Exp.', NON_AC: 'Small' };
+    plainBars($('c-tier'), R.by_tier.map(t => tn[t[0]] || t[0]), R.by_tier.map(t => t[1]), { h: 130, W: 420, color: R.by_tier.map(t => ({ AC: css('--blue'), EXECUTIVE: css('--purple'), PREMIUM: '#b3803f' })[t[0]] || css('--ink')), fmtv: v => fmt(v) + ' trips' });
+    plainBars($('c-tpb'), R.trips_per_bus.map(t => t[0] >= 20 ? '20+' : String(t[0])), R.trips_per_bus.map(t => t[1]), { fmtv: v => fmt(v) + ' buses', labelEvery: 2, W: 420, h: 230 });
+  }
+
+  // fares from the rules (exact on every harvested quote)
+  const st = Array.from({ length: 20 }, (_, i) => i + 1), ord = st.map(s => 4 + s);
+  const ac = o => o <= 6 ? 15 : o <= 9 ? 20 : o <= 12 ? 30 : o <= 16 ? 40 : o <= 18 ? 50 : o <= 20 ? 60 : o <= 22 ? 70 : 80;
+  (() => {
+    const svg = $('c-fare'), W = 720, h = 220, m = { l: 34, r: 8, t: 10, b: 22 };
+    svg.setAttribute('viewBox', `0 0 ${W} ${h}`); svg.innerHTML = '';
+    const series = [[ord, css('--green'), 'Ordinary'], [ord.map(o => Math.floor(1.5 * o)), css('--amber'), 'Express'], [ord.map(o => 2 * o + 1), css('--purple'), 'Deluxe'], [ord.map(ac), css('--blue'), 'AC']];
+    const top = 85, x = i => m.l + (W - m.l - m.r) * i / 19, y = v => m.t + (h - m.t - m.b) * (1 - v / top);
+    for (let v = 0; v <= 80; v += 20) { svg.append(S('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: 'grid-line' })); svg.append(S('text', { x: m.l - 6, y: y(v) + 3.5, 'text-anchor': 'end' }, '₹' + v)); }
+    for (const [vals, col, name] of series) {
+      svg.append(S('path', { d: vals.map((v, i) => `${i ? 'L' : 'M'}${x(i)} ${y(v)}`).join(''), fill: 'none', stroke: col, 'stroke-width': 2.5 }));
+      vals.forEach((v, i) => { const c = S('circle', { cx: x(i), cy: y(v), r: 3.2, fill: col }); hover(c, `Stage ${i + 1} · ${name} <b>₹${v}</b>`); svg.append(c); });
+    }
+    st.forEach((s, i) => { if (i % 2 === 0) svg.append(S('text', { x: x(i), y: h - 6, 'text-anchor': 'middle' }, 'stage ' + s)); });
+  })();
+
+  // map: slow corridors (real road shapes) + bunching hotspots
+  const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: [80.22, 13.03], zoom: 10.3, attributionControl: { compact: true } });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  map.on('style.load', () => {
+    map.getStyle().layers.forEach(l => {
+      if (l.type === 'background') map.setPaintProperty(l.id, 'background-color', '#f9f5ed');
+      else if (l.type === 'fill' && /water|ocean|sea/i.test(l.id)) map.setPaintProperty(l.id, 'fill-color', '#bfe3f2');
+    });
+    fetch('../data/seg_geo.json').then(r => r.json()).then(G => {
+      const want = new Map(SP.slowest_peak.map(s => [s[10], s]));
+      const feats = G.features.filter(f => want.has(f.properties.k)).map(f => { const s = want.get(f.properties.k); return { type: 'Feature', geometry: f.geometry, properties: { v: s[0], name: `${s[3]} → ${s[4]}`, n: s[1] } }; });
+      map.addSource('slow', { type: 'geojson', data: { type: 'FeatureCollection', features: feats } });
+      map.addLayer({ id: 'slow-case', type: 'line', source: 'slow', paint: { 'line-color': '#fff', 'line-width': 9 } });
+      map.addLayer({ id: 'slow', type: 'line', source: 'slow', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#c8102e', 'line-width': 5 } });
+      map.on('click', 'slow', e => new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<b>${e.features[0].properties.name}</b><br>${e.features[0].properties.v} km/h at the peaks · ${e.features[0].properties.n} passes`).addTo(map));
+    });
+    map.addSource('bunch', { type: 'geojson', data: { type: 'FeatureCollection', features: B.hotspots.map(h => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [h[3], h[2]] }, properties: { n: h[1], name: h[0], r: h[4].join(', ') } })) } });
+    map.addLayer({ id: 'bunch', type: 'circle', source: 'bunch', paint: { 'circle-radius': ['interpolate', ['linear'], ['sqrt', ['get', 'n']], 1, 4, 30, 26], 'circle-color': '#e0a100', 'circle-opacity': .55, 'circle-stroke-color': '#a06f00', 'circle-stroke-width': 1.2 } });
+    map.on('click', 'bunch', e => { const p = e.features[0].properties; new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<b>${p.name}</b><br>${p.n} bunching cases · routes ${p.r}`).addTo(map); });
+    ['slow', 'bunch'].forEach(id => { map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer'); map.on('mouseleave', id, () => map.getCanvas().style.cursor = ''); });
+    document.querySelectorAll('#maptabs button').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('#maptabs button').forEach(x => x.classList.toggle('on', x === b));
+      const l = b.dataset.l;
+      for (const id of ['slow', 'slow-case']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', l === 'bunch' ? 'none' : 'visible');
+      map.setLayoutProperty('bunch', 'visibility', l === 'slow' ? 'none' : 'visible');
+    }));
+  });
+}).catch(e => { $('stamp').textContent = 'Could not load the data.'; console.error(e); });
+</script>
+</body>
+</html>

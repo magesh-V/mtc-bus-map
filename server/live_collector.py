@@ -17,7 +17,7 @@ Output (rewritten atomically every --write seconds):
   {"t": now, "polled": n routes in the last cycle, "cycle": seconds per cycle,
    "v": [[reg, routeCode, lat, lon, bearing, fixEpoch, flags, [[stopIdx, etaEpoch], ...]], ...]}
   stopIdx indexes route_stops.json[routeCode].d[0].s; flags: a=AC e=electric l=low floor
-  x=express p=premium
+  x=express p=premium u=waiting for its next trip (fmt 2: eta is [i, dt, ...], dt after the fix)
 
 With --archive DIR it also keeps, per IST day:
   obs-YYYY-MM-DD.jsonl    every new GPS fix: {t, reg, r, la, lo, k (next stop idx), f}
@@ -41,6 +41,7 @@ import urllib.request
 
 BASE = 'https://api.moving.tech/pilot/app/v2'
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
+ETA_KEEP = 25
 
 
 def headers():
@@ -134,7 +135,7 @@ class Collector:
                 tier = v.get('serviceTierType') or ''
                 flags = ('a' if tier == 'AC' else '') + ('e' if 'EV' in sub else '') + \
                         ('l' if 'LF' in sub else '') + ('x' if tier == 'EXPRESS' else '') + \
-                        ('p' if tier == 'PREMIUM' else '')
+                        ('p' if tier == 'PREMIUM' else '') + ('u' if v.get('isUpcomingTrip') else '')
                 eta = [[ix[e['stop_id']], e['arrival_time_unix']] for e in v.get('eta') or []
                        if e.get('stop_id') in ix and e.get('arrival_time_unix')]
                 rows.append([v['number'], rc, round(p['lat'], 5), round(p['lon'], 5),
@@ -176,7 +177,8 @@ class Collector:
                 if pos and prev and prev[0] == code and prev[2] is not None:
                     dtt, dd = fix - prev[1], pos[0] - prev[2]
                     v = dd / dtt * 3.6 if dtt else 0
-                    if 60 <= dtt <= 2400 and dd >= 0 and v <= 70 and pos[1] >= prev[3]:
+                    # dd >= 30: a parked or laid-over bus is not traffic
+                    if 60 <= dtt <= 2400 and dd >= 30 and v <= 70 and pos[1] >= prev[3]:
                         spd.append({'t': fix, 'r': code, 'i0': prev[3], 'i1': pos[1], 'v': round(v, 1), 'dt': dtt})
                 self.last[reg] = (code, fix, pos[0] if pos else None, pos[1] if pos else None)
             for name, recs in (('obs', obs), ('speed', spd)):
@@ -200,7 +202,15 @@ class Collector:
                 prev = best.get(r[0])
                 if prev is None or r[5] > prev[5]:
                     best[r[0]] = r
-        return {'t': int(now), 'polled': self.cycle_n, 'cycle': round(self.cycle_s), 'v': list(best.values())}
+        # fmt 2: eta as a flat [i, dt, i, dt ...] with dt seconds after the fix, and
+        # only the next ETA_KEEP stops — about half the bytes phones download every poll
+        out = []
+        for r in best.values():
+            flat = []
+            for i, t in [e for e in r[7] if e[1] >= now - 120][:ETA_KEEP]:
+                flat += [i, int(t - r[5])]
+            out.append(r[:7] + [flat])
+        return {'t': int(now), 'fmt': 2, 'polled': self.cycle_n, 'cycle': round(self.cycle_s), 'v': out}
 
     def writer(self):
         while True:

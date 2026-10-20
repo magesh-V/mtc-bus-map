@@ -4,23 +4,43 @@
    chennai_one/v36/live_collector.py, which cycles through the running routes at
    a polite rate. A full cycle takes minutes, so a bus's GPS fix can be a few
    minutes old — but each bus also carries the app's own predicted arrival at
-   every stop still ahead of it. A bus is therefore drawn by dead reckoning
-   along its road-snapped route: from its last fix, through those predicted
-   stop times. Between polls the motion is the operator's own forecast, and
-   each new poll pulls the bus back onto its real position.
+   the stops ahead of it. A bus is therefore drawn by dead reckoning along its
+   road-snapped route: from its last fix, through those predicted stop times.
 
-   Row: [reg, routeCode, lat, lon, bearing, fixEpoch, flags, [[stopIdx, etaEpoch], ...]]
-   stopIdx indexes ROUTE_STOPS[routeCode].d[0].s; flags a=AC e=electric l=low floor x=express.
+   Two rules keep that honest (2026-10-20, after a field check that showed
+   buses "confused about direction"):
+     - a bus does not leave its fix before it has to. A bus waiting at a
+       terminus for its next trip used to creep forward and then be pulled back
+       by the next fix, sliding backwards on screen;
+     - a bus is never drawn moving backwards. If a new fix shows the forecast
+       ran ahead, the bus waits on the spot until reality catches up.
+   On the archive, buses really do move along their listed working 71 % of the
+   time and backwards only 1.4 %, so the route direction itself is right.
 
-   Loaded after app.js and shares its script scope (map, ROUTE_IDX, ROUTE_STOPS,
-   openStop, selectRoute, showCard, tagHTML, $). */
+   Rendering is a WebGL custom layer, not a GeoJSON source: re-tiling a GeoJSON
+   of thousands of points every frame is what made the page hot on phones.
+   Positions are computed only for buses in (or near) view, the frame rate
+   follows the zoom (a refresh every 2 s for the whole city, ~25 fps on a
+   street), and nothing runs while the tab is hidden. Moving buses glow in
+   their livery colour; AC buses carry a snowflake.
+
+   Row (fmt 2): [reg, routeCode, lat, lon, bearing, fixEpoch, flags, [i, dt, i, dt, ...]]
+   with dt seconds after the fix; older files carry [[i, etaEpoch], ...].
+   i indexes ROUTE_STOPS[routeCode].d[0].s; flags a=AC e=electric l=low floor
+   x=express p=premium u=waiting for its next trip.
+
+   Loaded after app.js and buses.js; shares app.js's script scope (map,
+   ROUTE_IDX, ROUTE_STOPS, openStop, selectRoute, showCard, tagHTML, $). */
 'use strict';
 (() => {
-  const URL_ = 'live/vehicles.json';
-  const POLL_MS = 20000, FRAME_MS = 100, K = 111320;
+  const URL_ = 'live/vehicles.json', K = 111320;
+  const MOBILE = matchMedia('(pointer: coarse)').matches || (navigator.hardwareConcurrency || 8) <= 4;
+  const SAVE = !!(navigator.connection && navigator.connection.saveData);
+  const CALM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const POLL_MS = MOBILE || SAVE ? 40000 : 20000;
   const lvOf = fl => BUSART.of(fl), lvCol = fl => BUSART.L[lvOf(fl)].key;
   let on = (() => { try { return localStorage.getItem('mtcLive') !== '0'; } catch (e) { return true; } })();
-  let FEED = null, fetchedAt = 0, pollT = null, frameT = null, CODE_FEAT = null;
+  let FEED = null, pollT = null, running = false, CODE_FEAT = null;
   let selReg = null, cardStop = null, cardBus = null;
   const GEO = new Map(), TRACK = new Map();
   const now = () => Date.now() / 1000;
@@ -40,52 +60,51 @@
   }
   function prep(coords) {
     const cx = Math.cos(coords[0][1] * Math.PI / 180) * K;
-    const pts = coords.map(c => [c[0] * cx, c[1] * K]), cum = [0];
-    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-    return { coords, pts, cum, cx };
+    const n = coords.length, xs = new Float64Array(n), ys = new Float64Array(n), cum = new Float64Array(n);
+    for (let i = 0; i < n; i++) { xs[i] = coords[i][0] * cx; ys[i] = coords[i][1] * K; if (i) cum[i] = cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]); }
+    return { xs, ys, cum, cx, n };
   }
-  // nearest point on the line between segments [i0, i1); returns {d, off, i}
-  function project(g, lon, lat, i0 = 0, i1 = g.pts.length - 1) {
+  // nearest point on the line between vertices [i0, i1]; returns {d, off, i}
+  function project(g, lon, lat, i0 = 0, i1 = g.n - 1) {
     const px = lon * g.cx, py = lat * K;
-    let best = { d: 0, off: Infinity, i: i0 };
-    for (let i = Math.max(0, i0); i < Math.min(i1, g.pts.length - 1); i++) {
-      const [ax, ay] = g.pts[i], [bx, by] = g.pts[i + 1], dx = bx - ax, dy = by - ay;
-      const L = dx * dx + dy * dy;
+    let bd = 0, bo = Infinity, bi = i0;
+    for (let i = Math.max(0, i0), e = Math.min(i1, g.n - 1); i < e; i++) {
+      const ax = g.xs[i], ay = g.ys[i], dx = g.xs[i + 1] - ax, dy = g.ys[i + 1] - ay, L = dx * dx + dy * dy;
       const t = L ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L)) : 0;
-      const off = Math.hypot(ax + t * dx - px, ay + t * dy - py);
-      if (off < best.off) best = { d: g.cum[i] + t * Math.sqrt(L), off, i };
+      const o = Math.hypot(ax + t * dx - px, ay + t * dy - py);
+      if (o < bo) { bo = o; bd = g.cum[i] + t * Math.sqrt(L); bi = i; }
     }
-    return best;
+    return { d: bd, off: bo, i: bi };
   }
-  // point on the line at distance d, in projected metres
-  function xy(g, d) {
-    const c = g.cum, n = c.length;
-    d = Math.max(0, Math.min(c[n - 1], d));
+  function xy(g, d, out) {
+    const c = g.cum, n = g.n;
+    d = d < 0 ? 0 : d > c[n - 1] ? c[n - 1] : d;
     let lo = 0, hi = n - 1;
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c[m] <= d) lo = m; else hi = m; }
-    const t = (d - c[lo]) / ((c[hi] - c[lo]) || 1), a = g.pts[lo], b = g.pts[hi];
-    return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+    const t = (d - c[lo]) / ((c[hi] - c[lo]) || 1);
+    out[0] = g.xs[lo] + t * (g.xs[hi] - g.xs[lo]); out[1] = g.ys[lo] + t * (g.ys[hi] - g.ys[lo]);
   }
-  /* Where the bus is and which way its nose points. The heading is taken over
-     the road just behind to just ahead of the bus rather than from the vertex
-     pair it sits on, so it swings through a bend instead of snapping at every
-     vertex of the snapped line. */
-  function at(g, d) {
-    const [x, y] = xy(g, d), [ax, ay] = xy(g, d - 18), [bx, by] = xy(g, d + 32);
-    const h = (Math.atan2(bx - ax, by - ay) * 180 / Math.PI + 360) % 360;
-    return [[x / g.cx, y / K], h];
+  /* Where the bus is and which way its nose points: the heading is taken over
+     the road just behind to just ahead, so it swings through a bend instead of
+     snapping at every vertex. Writes lon, lat, heading into out. */
+  const _a = [0, 0], _b = [0, 0], _c = [0, 0];
+  function at(g, d, out) {
+    xy(g, d, _a); xy(g, d - 18, _b); xy(g, d + 32, _c);
+    out[0] = _a[0] / g.cx; out[1] = _a[1] / K;
+    out[2] = (Math.atan2(_c[0] - _b[0], _c[1] - _b[1]) * 180 / Math.PI + 360) % 360;
   }
-  // the route line, plus where along it each stop sits (kept in running order)
+  // route line + where along it each stop sits; only built for buses in view
   function geo(code) {
     if (GEO.has(code)) return GEO.get(code);
     const f = codeFeat(code), st = stopsOf(code);
-    if (!st || st.length < 2 || !CODE_FEAT) return null;   // not loaded yet: try again next frame
+    if (!st || st.length < 2 || !CODE_FEAT) return null;
     let coords = f && f.geometry && (f.geometry.type === 'MultiLineString' ? f.geometry.coordinates.flat() : f.geometry.coordinates);
     if (!coords || coords.length < 2) coords = st.map(s => [s[3], s[2]]);
     const g = prep(coords);
     let seg = 0, prev = 0;
     g.stopD = st.map(s => {
-      let p = project(g, s[3], s[2], seg);
+      // search a window ahead of the previous stop first; the whole line only if that misses
+      let p = project(g, s[3], s[2], seg, seg + 400);
       if (p.off > 80) { const q = project(g, s[3], s[2]); if (q.off < p.off - 40) p = q; }
       const d = Math.max(prev, p.d); prev = d; seg = Math.max(seg, p.i);
       return d;
@@ -94,46 +113,38 @@
     return g;
   }
 
-  /* ── tracks: (time, distance) knots per bus, rebuilt on each poll ── */
-  function buildTracks() {
-    // where each bus is drawn right now, so the new track can blend from it
-    const t0 = now(), was = new Map();
-    for (const [reg, tr] of TRACK) if (tr.knots) was.set(reg, [tr.v[1], dOf(tr, t0)]);
-    TRACK.clear();
-    if (!FEED) return;
-    for (const v of FEED.v) {
-      const [reg, code, lat, lon, , fix, , eta] = v;
-      const g = geo(code);
-      const tr = { v, g, knots: null };
-      if (g && eta.length) {
-        const first = g.stopD[eta[0][0]];
-        const segMax = Math.max(1, g.cum.findIndex(c => c >= first) + 1);
-        const p = project(g, lon, lat, 0, segMax);
-        if (p.off < 300) {
-          const knots = [[fix, Math.min(p.d, first)]];
-          for (const [i, t] of eta) {
-            const d = g.stopD[i];
-            if (d == null || t <= knots[knots.length - 1][0] || d < knots[knots.length - 1][1]) continue;
-            knots.push([t, d]);
-          }
-          tr.knots = knots;
-          const w = was.get(reg);
-          if (w && w[0] === code) {
-            const off = w[1] - dOf(tr, t0);
-            if (Math.abs(off) < 2500) { tr.off = off; tr.offT = t0; }
-          }
-        }
-      }
-      TRACK.set(reg, tr);
+  /* ── tracks: (time, distance) knots per bus, built lazily when in view ── */
+  const CRUISE = 5.5;                 // m/s, ~20 km/h: how long a bus needs to reach its next stop
+  function makeTrack(tr) {
+    tr.ready = true;
+    const [, code, lat, lon, , fix, fl, eta] = tr.v;
+    const g = geo(code);
+    if (!g) { tr.ready = !(ROUTE_STOPS && CODE_FEAT); return; }   // retry once data has loaded
+    tr.g = g;
+    if (!eta.length) return;
+    const first = g.stopD[eta[0][0]];
+    if (first == null) return;
+    let segMax = 1;
+    while (segMax < g.n - 1 && g.cum[segMax] < first) segMax++;
+    const p = project(g, lon, lat, 0, segMax + 1);
+    if (p.off > 150) return;          // off its route (depot, diversion): drawn at the GPS fix
+    const d0 = Math.min(p.d, first), knots = [[fix, d0]];
+    for (const [i, t] of eta) {
+      const d = g.stopD[i], last = knots[knots.length - 1];
+      if (d == null || t <= last[0] || d < last[1]) continue;
+      knots.push([t, d]);
     }
+    // leave the fix only when it must to make the first predicted stop
+    if (knots.length > 1) {
+      const need = (knots[1][1] - d0) / CRUISE;
+      knots[0][2] = Math.max(fix, knots[1][0] - need);
+    }
+    tr.knots = knots;
+    tr.upcoming = fl.includes('u');
   }
-  /* Distance along the route at time t. Between two predicted stop times the
-     bus does not glide at constant speed: it waits at the stop (DWELL), pulls
-     away, cruises and slows into the next one (smoothstep). From the GPS fix,
-     which is mid-road, it is already moving (ease-out). When a new poll
-     moves a bus, the difference is blended away over BLEND seconds rather than
-     teleporting it. */
-  const DWELL = 14, BLEND = 4;
+  /* Distance along the route at time t: dwell at each stop, smoothstep between
+     stops, and never less than what is already on screen (tr.hold). */
+  const DWELL = 14;
   function dOf(tr, t) {
     const k_ = tr.knots;
     let d = k_[0][1];
@@ -142,101 +153,295 @@
       for (let k = 1; k < k_.length; k++) {
         if (t <= k_[k][0]) {
           const [t0, d0] = k_[k - 1], [t1, d1] = k_[k];
-          const dep = k > 1 ? t0 + Math.min(DWELL, 0.3 * (t1 - t0)) : t0;
+          const dep = k > 1 ? t0 + Math.min(DWELL, 0.3 * (t1 - t0)) : (k_[0][2] || t0);
           const u = Math.max(0, Math.min(1, (t - dep) / ((t1 - dep) || 1)));
           d = d0 + (d1 - d0) * (k > 1 ? u * u * (3 - 2 * u) : u * (2 - u));
           break;
         }
       }
     }
-    if (tr.off) {
-      const f = 1 - (t - tr.offT) / BLEND;
-      if (f > 0) d += tr.off * f * f; else tr.off = 0;
-    }
+    if (tr.hold != null) { if (d < tr.hold) d = tr.hold; else tr.hold = null; }
     return d;
   }
-  function posOf(tr, t) {
-    if (!tr.knots) return [[tr.v[3], tr.v[2]], tr.v[4] || 0];
-    return at(tr.g, dOf(tr, t));
+  const _p = [0, 0, 0];
+  function posOf(tr, t, out = _p) {
+    if (!tr.ready) makeTrack(tr);
+    if (!tr.knots) { out[0] = tr.v[3]; out[1] = tr.v[2]; out[2] = tr.v[4] || 0; return out; }
+    tr.lastD = dOf(tr, t);
+    at(tr.g, tr.lastD, out);
+    return out;
   }
 
-  /* ── drawing ── */
-  function addLayers() {
-    if (map.getSource('live')) return;
-    BUSART.register(map);
-    map.addSource('live', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addLayer({ id: 'live-halo', type: 'circle', source: 'live', filter: ['==', ['get', 'sel'], 1],
-      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 9, 15, 18], 'circle-color': ['get', 'c'], 'circle-opacity': 0.22, 'circle-blur': 0.4 } });
-    /* City zooms: a top-down bus turning with the road. From z15.5 the
-       side view takes over, laid along the road and facing the way it goes. */
-    const SIDE_Z = 15.5;
-    map.addLayer({ id: 'live-bus', type: 'symbol', source: 'live',
-      layout: {
-        'icon-image': ['step', ['zoom'], ['concat', 'top-', ['get', 'lv']], SIDE_Z,
-          ['concat', 'side-', ['get', 'lv'], ['case', ['<', ['get', 'h'], 180], '-r', '-l']]],
-        // side view: the right-facing sprite turned h-90 for eastward headings,
-        // the left-facing one turned h-270 for westward — the bus lies along the
-        // road with its nose forward and is never drawn upside down
-        'icon-rotate': ['step', ['zoom'], ['get', 'h'], SIDE_Z,
-          ['case', ['<', ['get', 'h'], 180], ['-', ['get', 'h'], 90], ['-', ['get', 'h'], 270]]],
-        'icon-rotation-alignment': 'map',
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.2, 12, 0.3, 14, 0.45, 15.4, 0.62, 15.5, 0.5, 18, 0.85],
-        'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        'symbol-sort-key': ['get', 'sel'] } });
-    map.addLayer({ id: 'live-num', type: 'symbol', source: 'live', minzoom: 13,
-      layout: { 'text-field': ['get', 'sn'], 'text-font': ['Noto Sans Bold'], 'text-size': 11,
-        'text-offset': ['step', ['zoom'], ['literal', [0, 1.5]], 15.5, ['literal', [0, 1.35]]],
-        'text-anchor': 'top', 'text-optional': true, 'text-padding': 1 },
-      paint: { 'text-color': ['get', 'c'], 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
-    // a moving 10-px bus is hard to hit exactly, so the nearest one within 12 px takes the click
-    map.on('click', e => {
-      const hits = busesNear(e.point);
-      if (!hits.length) return;
-      const pt = f => map.project(f.geometry.coordinates);
-      hits.sort((x, y) => Math.hypot(pt(x).x - e.point.x, pt(x).y - e.point.y) - Math.hypot(pt(y).x - e.point.x, pt(y).y - e.point.y));
-      openBus(hits[0].properties.reg);
-    });
-    map.on('mouseenter', 'live-bus', () => map.getCanvas().style.cursor = 'pointer');
-    map.on('mouseleave', 'live-bus', () => map.getCanvas().style.cursor = '');
-  }
-  const busesNear = p => map.getLayer('live-bus') && map.getLayoutProperty('live-bus', 'visibility') !== 'none'
-    ? map.queryRenderedFeatures([[p.x - 12, p.y - 12], [p.x + 12, p.y + 12]], { layers: ['live-bus'] }) : [];
-  window.liveBusAt = p => busesNear(p).length > 0;
-  const snOf = code => { const f = codeFeat(code); return f ? (f.properties.sn || f.properties.route_name) : code; };
-  function frame() {
-    if (!on || !FEED || document.hidden) return;
-    if (TRACK.size === 0 || [...TRACK.values()].some(tr => !tr.g && stopsOf(tr.v[1]))) buildTracks();
-    const t = now(), feats = [];
-    const z = map.getZoom(), b = z >= 12 ? map.getBounds() : null;
-    const pad = b ? Math.max(b.getEast() - b.getWest(), b.getNorth() - b.getSouth()) * 0.25 : 0;
-    for (const [reg, tr] of TRACK) {
-      if (b && reg !== selReg && (tr.v[3] < b.getWest() - pad - .05 || tr.v[3] > b.getEast() + pad + .05
-          || tr.v[2] < b.getSouth() - pad - .05 || tr.v[2] > b.getNorth() + pad + .05)) continue;
-      const [ll, h] = posOf(tr, t);
-      feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: ll },
-        properties: { reg, h, lv: lvOf(tr.v[6]), c: lvCol(tr.v[6]), sn: snOf(tr.v[1]), sel: reg === selReg ? 1 : 0 } });
+  function parse(j) {
+    // fmt 2 ships eta as [i, dt, i, dt ...]; expand to [[i, epoch], ...] once per poll
+    if (j.fmt === 2) for (const v of j.v) {
+      const f = v[7], out = [];
+      for (let k = 0; k + 1 < f.length; k += 2) out.push([f[k], v[5] + f[k + 1]]);
+      v[7] = out;
     }
-    const src = map.getSource('live');
-    if (src) src.setData({ type: 'FeatureCollection', features: feats });
+    return j;
+  }
+  function ingest(j) {
+    const t = now(), prev = new Map(TRACK);
+    TRACK.clear();
+    for (const v of j.v) {
+      const tr = { v, ready: false, g: null, knots: null, lastD: null, hold: null, moving: 0 };
+      const old = prev.get(v[0]);
+      if (old && old.v[1] === v[1] && old.lastD != null) {
+        // same bus, same working, drawn before: keep it from jumping backwards
+        posOf(tr, t, [0, 0, 0]);
+        if (tr.knots && tr.lastD < old.lastD - 25 && old.lastD - tr.lastD < 1500) tr.hold = old.lastD;
+        tr.moving = old.moving;
+      }
+      TRACK.set(v[0], tr);
+    }
   }
 
-  // ~30 fps at street zooms (only buses on screen are moved), 10 fps city-wide
-  let lastF = 0;
-  function loop(ts) {
-    if (!frameT) return;
-    requestAnimationFrame(loop);
-    const gap = map.getZoom() >= 14 ? 33 : FRAME_MS;
-    if (ts && ts - lastF < gap) return;
-    lastF = ts || 0;
-    frame();
+  /* ── crowding (estimated) ──
+     No crowd or ticket counts are published for MTC buses, and Chennai One's
+     crowd field is empty. What is real and hourly: when the city travels —
+     CMRL's ticket entries by hour (weekday and weekend averages over 44 days
+     of the CMRL Commuter Archive, Sept–Oct 2026) — and how many buses each
+     working runs in that hour (its timetable). Crowding is the ratio of the
+     two: the hour's share of the day's riders over the hour's share of the
+     route's buses. A route that runs few buses at 9 am rates crowded; one
+     with a big peak fleet does not. An estimate, labelled as one. */
+  const DEM_WD = [0.01, 0, 0, 0, 0.27, 0.93, 2.41, 3.92, 7.53, 11.08, 7.71, 4.39, 4.16, 4.67, 5.17, 4.44, 4.86, 6.73, 10.12, 9.44, 6.16, 3.69, 1.83, 0.47];
+  const DEM_WE = [0.01, 0, 0, 0, 0.39, 1.35, 2.61, 3.56, 4.81, 6.18, 6.33, 5.54, 5.57, 5.62, 6.74, 6.49, 6.77, 7.33, 8.4, 7.94, 6.16, 4.67, 2.81, 0.71];
+  const CROWD_NAMES = ['Seats free', 'Seats taken', 'Standing room only'];
+  let timingsAsked = false;
+  function ensureTimings() {
+    if (TIMINGS !== undefined || timingsAsked) return;
+    timingsAsked = true;
+    fetch(`data/timings.json?v=${DATA_V}`).then(r => r.ok ? r.json() : {}).then(j => { if (TIMINGS === undefined) TIMINGS = j; crowdCache.clear(); }).catch(() => {});
   }
+  function crowdRatio(code, h, weekend) {
+    const tm = TIMINGS && TIMINGS[code]; if (!tm || !tm.hours) return null;
+    const S = tm.hours, tot = S.reduce((a, b) => a + b, 0); if (!tot) return null;
+    const sup = (S[h] * 0.5 + (S[(h + 23) % 24] + S[(h + 1) % 24]) * 0.25) / tot;
+    const dem = (weekend ? DEM_WE : DEM_WD)[h] / 100;
+    return Math.min(3, dem / Math.max(sup, 0.5 / tot));
+  }
+  const crowdCache = new Map();
+  function crowdOf(code, h) {
+    const k = code + ':' + h;
+    if (crowdCache.has(k)) return crowdCache.get(k);
+    const d = new Date(Date.now() + 19800000), we = d.getUTCDay() === 0 || d.getUTCDay() === 6;
+    const r = crowdRatio(code, h, we);
+    const out = r == null ? null : { r, level: r < 0.75 ? 0 : r < 1.3 ? 1 : 2, p: 1 / (1 + Math.exp(-(r - 1.15) * 3.5)), we };
+    if (TIMINGS) crowdCache.set(k, out);
+    return out;
+  }
+  const PEOPLE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+  const CROWD_COL = ['#2fa35a', '#e0a100', '#d6402b'];
+
+  /* ── WebGL layer ── */
+  const VS = `
+    attribute vec2 a_pos; attribute vec2 a_off; attribute vec2 a_uv; attribute float a_rot; attribute vec4 a_col;
+    uniform mat4 u_matrix; uniform vec2 u_view; uniform float u_bearing;
+    varying vec2 v_uv; varying vec4 v_col;
+    void main() {
+      vec4 p = u_matrix * vec4(a_pos, 0.0, 1.0);
+      float r = radians(a_rot) - u_bearing * step(-500.0, a_rot);
+      if (a_rot < -500.0) r = 0.0;
+      vec2 o = vec2(a_off.x * cos(r) - a_off.y * sin(r), a_off.x * sin(r) + a_off.y * cos(r));
+      p.xy += vec2(o.x, -o.y) * 2.0 / u_view * p.w;
+      gl_Position = p; v_uv = a_uv; v_col = a_col;
+    }`;
+  const FS = `
+    precision mediump float; uniform sampler2D u_tex; varying vec2 v_uv; varying vec4 v_col;
+    void main() { gl_FragColor = texture2D(u_tex, v_uv) * v_col; }`;
+  const STRIDE = 12;                       // pos2 off2 uv2 rot1 col4 + pad1
+  let vbuf = new Float32Array(STRIDE * 6 * 4096), nverts = 0, ref = [0.5, 0.5], UV = null;
+  const hex = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+  const COLS = {};
+  const mercX = lng => (lng + 180) / 360;
+  const mercY = lat => (180 - (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))) / 360;
+
+  function quad(mx, my, w, h, uv, rot, r, g, b, a, dy = 0) {
+    if ((nverts + 6) * STRIDE > vbuf.length) { const nb = new Float32Array(vbuf.length * 2); nb.set(vbuf); vbuf = nb; }
+    const x0 = -w / 2, x1 = w / 2, y0 = -h / 2 + dy, y1 = h / 2 + dy;
+    const P = [[x0, y0, uv[0], uv[1]], [x1, y0, uv[2], uv[1]], [x1, y1, uv[2], uv[3]], [x0, y0, uv[0], uv[1]], [x1, y1, uv[2], uv[3]], [x0, y1, uv[0], uv[3]]];
+    for (const [ox, oy, u, v] of P) {
+      const o = nverts++ * STRIDE;
+      vbuf[o] = mx; vbuf[o + 1] = my; vbuf[o + 2] = ox; vbuf[o + 3] = oy; vbuf[o + 4] = u; vbuf[o + 5] = v;
+      vbuf[o + 6] = rot; vbuf[o + 7] = r * a; vbuf[o + 8] = g * a; vbuf[o + 9] = b * a; vbuf[o + 10] = a;
+    }
+  }
+
+  const glLayer = {
+    id: 'live-gl', type: 'custom', renderingMode: '2d',
+    onAdd(m, gl) {
+      const sh = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+      const pr = gl.createProgram();
+      gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr);
+      this.pr = pr; this.buf = gl.createBuffer();
+      this.loc = {};
+      for (const a of ['a_pos', 'a_off', 'a_uv', 'a_rot', 'a_col']) this.loc[a] = gl.getAttribLocation(pr, a);
+      for (const u of ['u_matrix', 'u_view', 'u_bearing', 'u_tex']) this.loc[u] = gl.getUniformLocation(pr, u);
+      const at = BUSISO.atlas(MOBILE ? 1.0 : 1.25, MOBILE ? 2048 : 4096); UV = at.uv;
+      this.tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.tex);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, at.canvas);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.dirty = true;
+    },
+    render(gl, matrix) {
+      if (!on || !nverts) return;
+      const l = this.loc;
+      gl.useProgram(this.pr);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
+      if (this.dirty) { gl.bufferData(gl.ARRAY_BUFFER, vbuf.subarray(0, nverts * STRIDE), gl.DYNAMIC_DRAW); this.dirty = false; }
+      const F = 4;
+      const attr = (n, size, off) => { gl.enableVertexAttribArray(l[n]); gl.vertexAttribPointer(l[n], size, gl.FLOAT, false, STRIDE * F, off * F); };
+      attr('a_pos', 2, 0); attr('a_off', 2, 2); attr('a_uv', 2, 4); attr('a_rot', 1, 6); attr('a_col', 4, 7);
+      // positions are relative to `ref` for float precision; fold the offset into the matrix
+      const M = Array.from(matrix), rx = ref[0], ry = ref[1];
+      M[12] = matrix[0] * rx + matrix[4] * ry + matrix[12]; M[13] = matrix[1] * rx + matrix[5] * ry + matrix[13];
+      M[14] = matrix[2] * rx + matrix[6] * ry + matrix[14]; M[15] = matrix[3] * rx + matrix[7] * ry + matrix[15];
+      gl.uniformMatrix4fv(l.u_matrix, false, new Float32Array(M));
+      const cv = map.getCanvas();
+      gl.uniform2f(l.u_view, cv.clientWidth, cv.clientHeight);
+      gl.uniform1f(l.u_bearing, map.getBearing() * Math.PI / 180);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.tex); gl.uniform1i(l.u_tex, 0);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawArrays(gl.TRIANGLES, 0, nverts);
+    },
+  };
+
+  /* ── per-update: positions of buses in view -> vertex buffer ── */
+  const lerp = (z, pts) => { if (z <= pts[0][0]) return pts[0][1]; for (let i = 1; i < pts.length; i++) if (z <= pts[i][0]) { const [z0, a] = pts[i - 1], [z1, b] = pts[i]; return a + (b - a) * (z - z0) / (z1 - z0); } return pts[pts.length - 1][1]; };
+  const fl0 = v => v[6] || '';
+  let VIS = [];                            // [reg, lng, lat, halfSize] of what was drawn, for clicks and labels
+  const P3 = [0, 0, 0];
+  function update() {
+    if (!on || !FEED || !UV) return;
+    const t = now(), z = map.getZoom(), b = map.getBounds();
+    const padX = (b.getEast() - b.getWest()) * 0.2 + 0.01, padY = (b.getNorth() - b.getSouth()) * 0.2 + 0.01;
+    const W = b.getWest() - padX, E = b.getEast() + padX, S_ = b.getSouth() - padY, N = b.getNorth() + padY;
+    const city = z < 11.5, bearing = map.getBearing();
+    // 3D sprites: CW x CH logical px, anchored where the wheels meet the road
+    const s = lerp(z, [[9, 0.16], [12, 0.22], [14, 0.38], [16, 0.62], [18, 1.0]]);
+    const [CW, CH] = BUSISO.CELL, [, AY] = BUSISO.ANCHOR;
+    const bw = CW * s, bh = CH * s, lift = -(AY - CH / 2) * s;
+    const glowR = 12 * 9 * s * 1.35;
+    const snowZ = z >= 12.5, snowPx = lerp(z, [[12.5, 10], [15, 14], [18, 18]]);
+    const hourNow = new Date(Date.now() + 19800000).getUTCHours();
+    const pulseT = CALM ? 0 : t * 2.4;
+    ref = [mercX((b.getWest() + b.getEast()) / 2), mercY((b.getNorth() + b.getSouth()) / 2)];
+    const glows = [], buses = [], snows = [];
+    VIS = [];
+    for (const [reg, tr] of TRACK) {
+      const v = tr.v;
+      // cull on the fix first (cheap); a bus moves a few km at most between polls
+      if (reg !== selReg && (v[3] < W - 0.05 || v[3] > E + 0.05 || v[2] < S_ - 0.05 || v[2] > N + 0.05)) continue;
+      const prevD = tr.lastD;
+      if (city && !tr.ready) {
+        // city view: the GPS fix as-is — no route geometry built, nothing to animate
+        P3[0] = v[3]; P3[1] = v[2]; P3[2] = v[4] || 0;
+        if (!fl0(v).includes('u')) tr.moving = t;
+      } else posOf(tr, t, P3);
+      const lng = P3[0], lat = P3[1], h = P3[2];
+      if (reg !== selReg && (lng < W || lng > E || lat < S_ || lat > N)) continue;
+      if (tr.lastD != null && prevD != null && tr.lastD - prevD > 0.05) tr.moving = t; // moved since last update
+      const mx = mercX(lng) - ref[0], my = mercY(lat) - ref[1];
+      const fl = v[6], lv = lvOf(fl), col = COLS[lv] || (COLS[lv] = hex(BUSART.L[lv].key));
+      const isMoving = t - (tr.moving || 0) < 3, sel = reg === selReg;
+      if (isMoving || sel) {
+        const ph = (reg.charCodeAt(1) * 7 + reg.charCodeAt(reg.length - 1) * 13) % 628 / 100;
+        const a = sel ? 0.55 : (0.30 + 0.14 * Math.sin(pulseT + ph)) * (z < 12 ? 0.6 : 1);
+        glows.push([mx, my, glowR * (sel ? 1.5 : 1), col, a]);
+      }
+      const dir = Math.round((((h - bearing) % 360 + 360) % 360) / 22.5) % 16;
+      const cr = crowdOf(v[1], hourNow), lvl = cr ? cr.level : 1;
+      buses.push([mx, my, `${lv}:${dir}:${lvl}`]);
+      if (snowZ && fl.includes('a')) snows.push([mx, my, -(AY * s + snowPx * 0.55)]);
+      VIS.push([reg, lng, lat, Math.max(14, 12 * 9 * s * 0.45)]);
+    }
+    nverts = 0;
+    for (const [mx, my, r, c, a] of glows) quad(mx, my, r, r, UV.glow, -1000, c[0], c[1], c[2], a);
+    buses.sort((p, q) => p[1] - q[1]);              // back to front: farther (higher on screen) first
+    for (const [mx, my, key] of buses) quad(mx, my, bw, bh, UV[key], -1000, 1, 1, 1, 1, lift);
+    for (const [mx, my, dy] of snows) quad(mx, my, snowPx, snowPx, UV.snow, -1000, 1, 1, 1, 1, dy);
+    glLayer.dirty = true;
+    map.triggerRepaint();
+  }
+
+  // route numbers: a light symbol layer, refreshed twice a second, street zooms only
+  let lastLabel = 0;
+  function labels(force) {
+    const src = map.getSource('live-lbl'); if (!src) return;
+    const z = map.getZoom(), t = performance.now();
+    if (!force && t - lastLabel < 500) return;
+    lastLabel = t;
+    const feats = z < 14 || !on ? [] : VIS.slice(0, 400).map(([reg, lng, lat]) => {
+      const tr = TRACK.get(reg);
+      return { type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: { sn: snOf(tr.v[1]), c: lvCol(tr.v[6]) } };
+    });
+    src.setData({ type: 'FeatureCollection', features: feats });
+  }
+
+  /* Pace: how often bus positions are recomputed. The map itself redraws on
+     every pan or zoom regardless; this is only the animation clock. */
+  function interval() {
+    const z = map.getZoom();
+    if (CALM || SAVE) return 3000;
+    if (z < 11) return 2000;
+    if (z < 13) return MOBILE ? 500 : 250;
+    return MOBILE ? 50 : 33;
+  }
+  let lastU = 0;
+  function loop(ts) {
+    if (!running) return;
+    requestAnimationFrame(loop);
+    if (document.hidden || !FEED) return;
+    if (ts - lastU < interval()) return;
+    lastU = ts;
+    update(); labels();
+  }
+  map.on('moveend', () => { if (running) { update(); labels(true); } });
+
+  function addLayers() {
+    if (map.getLayer('live-gl')) return;
+    map.addLayer(glLayer);
+    map.addSource('live-lbl', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({ id: 'live-num', type: 'symbol', source: 'live-lbl', minzoom: 14,
+      layout: { 'text-field': ['get', 'sn'], 'text-font': ['Noto Sans Bold'], 'text-size': 11,
+        'text-offset': [0, 1.6], 'text-anchor': 'top', 'text-optional': true, 'text-padding': 1 },
+      paint: { 'text-color': ['get', 'c'], 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
+  }
+  // clicks: the nearest drawn bus within reach of the tap
+  function busAt(p) {
+    if (!on || !running) return null;
+    let best = null, bd = Infinity;
+    for (const [reg, lng, lat, half] of VIS) {
+      const q = map.project([lng, lat]), d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < Math.max(14, half) && d < bd) { bd = d; best = reg; }
+    }
+    return best;
+  }
+  window.liveBusAt = p => !!busAt(p);
+  map.on('click', e => { const r = busAt(e.point); if (r) openBus(r); });
+  let hoverT = 0;
+  map.on('mousemove', e => {
+    if (performance.now() - hoverT < 80) return; hoverT = performance.now();
+    if (busAt(e.point)) map.getCanvas().style.cursor = 'pointer';
+    else if (map.getCanvas().style.cursor === 'pointer' && !map.queryRenderedFeatures(e.point).length) map.getCanvas().style.cursor = '';
+  });
+  const snOf = code => { const f = codeFeat(code); return f ? (f.properties.sn || f.properties.route_name) : code; };
 
   /* ── polling ── */
   function poll() {
+    if (document.hidden) return;
     fetch(`${URL_}?t=${Math.floor(Date.now() / 10000)}`).then(r => r.ok ? r.json() : null).then(j => {
       if (!j || !Array.isArray(j.v)) throw 0;
-      FEED = j; fetchedAt = Date.now();
-      buildTracks(); frame(); pill();
+      FEED = parse(j);
+      ingest(FEED); update(); labels(true); pill();
       if (cardStop) paintStopArrivals();
       if (cardBus) paintBus(cardBus);
     }).catch(() => { pill(true); });
@@ -247,18 +452,20 @@
       .catch(() => {});
   }
   function start() {
+    ensureTimings();
     addLayers();
-    ['live-bus', 'live-num', 'live-halo'].forEach(id => map.setLayoutProperty(id, 'visibility', 'visible'));
-    ensureStops().then(() => { GEO.clear(); buildTracks(); });
+    map.setLayoutProperty('live-num', 'visibility', 'visible');
+    ensureStops().then(() => { for (const tr of TRACK.values()) tr.ready = false; GEO.clear(); });
     poll();
     clearInterval(pollT);
     pollT = setInterval(poll, POLL_MS);
-    if (!frameT) { frameT = 1; loop(); }
+    if (!running) { running = true; requestAnimationFrame(loop); }
     pill();
   }
   function stop() {
-    clearInterval(pollT); pollT = frameT = null;
-    ['live-bus', 'live-num', 'live-halo'].forEach(id => map.getLayer(id) && map.setLayoutProperty(id, 'visibility', 'none'));
+    clearInterval(pollT); pollT = null; running = false;
+    nverts = 0; VIS = []; map.triggerRepaint();
+    if (map.getLayer('live-num')) { map.setLayoutProperty('live-num', 'visibility', 'none'); }
     pill();
     if (cardStop) paintStopArrivals();
   }
@@ -279,6 +486,7 @@
     #live-pill .key i { display: inline-block; width: 6px; height: 13px; border-radius: 3px 3px 1.5px 1.5px; margin-right: 3px; vertical-align: -1px; }
     @keyframes lpulse { 70% { box-shadow: 0 0 0 7px rgba(240,27,72,0); } 100% { box-shadow: 0 0 0 0 rgba(240,27,72,0); } }
     @media (max-width: 640px) { #live-pill .key { display: none; } }
+    @media (prefers-reduced-motion: reduce) { #live-pill .dot { animation: none; } }
     .lv-row { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 7px 2px; border-bottom: 1px solid #efe9de; }
     .lv-row:last-child { border-bottom: 0; }
     .lv-row .when { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
@@ -288,6 +496,12 @@
     .lv-chip { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 5px; margin-right: 4px; color: #fff; vertical-align: 1px; }
     .lv-hero { display: grid; place-items: center; padding: 4px 0 2px; }
     .lv-hero img { width: min(300px, 86%); height: auto; }
+    .lv-crowd { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; padding: 2px 2px 8px; }
+    .lv-crowd span:last-child { color: var(--muted); font-size: 12px; }
+    .lv-bars { display: flex; align-items: flex-end; gap: 2px; height: 46px; padding: 0 2px; }
+    .lv-bars i { flex: 1; border-radius: 2px 2px 0 0; min-height: 2px; }
+    .lv-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); padding: 3px 2px 0; font-variant-numeric: tabular-nums; }
+    .lv-hero img { width: min(230px, 66%); margin: -14px 0 -10px; }
     .lv-note { font-size: 12px; color: var(--muted); padding: 6px 2px 2px; }
     .lv-btn { margin-top: 6px; border: 0; background: #f6f1e7; color: #333; font-weight: 600; border-radius: 9px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
     .lv-btn:hover { background: #efe8da; }
@@ -316,7 +530,8 @@
     const v = BUSART.L[lvOf(fl)];
     return `<span class="lv-chip" style="background:${v.key}">${v.name}</span>`
       + (fl.includes('l') ? `<span class="lv-chip" style="background:#6b6b6b">Low floor</span>` : '')
-      + (fl.includes('x') ? `<span class="lv-chip" style="background:#b8860b">Express</span>` : '');
+      + (fl.includes('x') ? `<span class="lv-chip" style="background:#b8860b">Express</span>` : '')
+      + (fl.includes('u') ? `<span class="lv-chip" style="background:#8a8a8e">Waiting for next trip</span>` : '');
   };
   const ago = s => s < 90 ? `${Math.max(0, Math.round(s))} s` : `${Math.round(s / 60)} min`;
 
@@ -324,7 +539,7 @@
     const tr = TRACK.get(reg); if (!tr) return;
     selReg = reg; cardBus = reg; cardStop = null;
     if (selStopMarker) { selStopMarker.remove(); selStopMarker = null; }
-    showCard(); paintBus(reg); frame();
+    showCard(); paintBus(reg); update();
   }
   function paintBus(reg) {
     const tr = TRACK.get(reg);
@@ -336,8 +551,21 @@
     const t = now();
     const rows = eta.filter(([, et]) => et > t - 30).slice(0, 14).map(([i, et]) =>
       `<div class="lv-row"><span></span><span class="meta"><b>${(st[i] && st[i][1]) || 'Stop'}</b></span><span class="when">${inMin(et)}<small>${hhmm(et)}</small></span></div>`).join('');
-    const facing = posOf(tr, now())[1];
-    $('card-body').innerHTML = `<div class="lv-hero"><img alt="${BUSART.L[lvOf(fl)].name} bus" src="${BUSART.portrait(lvOf(fl), facing >= 180)}"></div>`
+    const facing = posOf(tr, now(), [0, 0, 0])[2];
+    const hNow = new Date(Date.now() + 19800000).getUTCHours(), cr = crowdOf(code, hNow);
+    let crowdHTML = '';
+    if (cr) {
+      const bars = Array.from({ length: 24 }, (_, h) => crowdRatio(code, h, cr.we));
+      const mx = Math.max(1.6, ...bars.filter(x => x != null));
+      crowdHTML = `<div class="seclbl">Crowding now · estimated</div>`
+        + `<div class="lv-crowd"><span style="color:${CROWD_COL[cr.level]}">${PEOPLE} <b>${CROWD_NAMES[cr.level]}</b></span>`
+        + `<span>${Math.round(cr.p * 100)}% chance you'll stand</span></div>`
+        + `<div class="lv-bars" title="Estimated crowding by hour on this working">${bars.map((x, h) => `<i style="height:${x == null ? 2 : Math.max(2, 100 * x / mx)}%;background:${x == null ? '#e7e2d6' : CROWD_COL[x < 0.75 ? 0 : x < 1.3 ? 1 : 2]};${h === hNow ? 'outline:1.5px solid #1c1c1e;outline-offset:1px' : ''}"></i>`).join('')}</div>`
+        + `<div class="lv-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>`
+        + `<div class="lv-note">Not a passenger count: when Chennai travels (CMRL hourly tickets) against how many buses this working runs each hour.</div>`;
+    }
+    $('card-body').innerHTML = `<div class="lv-hero"><img alt="${BUSART.L[lvOf(fl)].name} bus" src="${BUSISO.portrait(lvOf(fl), cr ? cr.level : 1, (facing + 360) % 360)}"></div>`
+      + crowdHTML
       + `<div class="seclbl">Next stops (predicted)</div>`
       + (rows || '<div class="lv-note">At the end of its trip.</div>')
       + `<button class="lv-btn" id="lv-route">Show route ${sn}</button>`;
@@ -384,7 +612,7 @@
     const rows = arr.slice(0, 12).map(a => {
       const f = codeFeat(a.code), dest = f ? f.properties.destinatio : '';
       return `<div class="lv-row" data-reg="${a.reg}" style="cursor:pointer">${tagHTML(snOf(a.code), f && f.properties.category)}`
-        + `<span class="meta">→ <b>${dest || ''}</b><br>${chips(a.fl)}${a.reg}</span>`
+        + `<span class="meta">→ <b>${dest || ''}</b><br>${chips(a.fl)}${a.reg}${(c => c ? ` <span title="${CROWD_NAMES[c.level]} (estimated)" style="color:${CROWD_COL[c.level]}">${PEOPLE}</span>` : '')(crowdOf(a.code, new Date(a.et * 1000 + 19800000).getUTCHours()))}</span>`
         + `<span class="when">${inMin(a.et)}<small>${hhmm(a.et)}</small></span></div>`;
     }).join('');
     box.innerHTML = `<div class="seclbl">Live arrivals · next 90 min</div>`
@@ -393,7 +621,7 @@
     box.querySelectorAll('[data-reg]').forEach(el => el.addEventListener('click', () => {
       const tr = TRACK.get(el.dataset.reg); if (!tr) return;
       openBus(el.dataset.reg);
-      const [ll] = posOf(tr, now()); map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 14), duration: 700 });
+      const p = posOf(tr, now(), [0, 0, 0]); map.flyTo({ center: [p[0], p[1]], zoom: Math.max(map.getZoom(), 14), duration: 700 });
     }));
   }
 
@@ -407,7 +635,7 @@
     $('card-body').prepend(box);
     paintStopArrivals();
   };
-  $('card-close').addEventListener('click', () => { cardStop = cardBus = selReg = null; frame(); });
+  $('card-close').addEventListener('click', () => { cardStop = cardBus = selReg = null; update(); });
   const baseSelect = selectRoute;
   selectRoute = function (...a) { cardStop = cardBus = selReg = null; return baseSelect.apply(this, a); };
 

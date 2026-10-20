@@ -71,14 +71,14 @@ def main():
                 continue
             for r in read(p):
                 st = codes.get(r['r'])
-                if not st or r['i1'] - r['i0'] > MAX_SPAN:
-                    continue
+                if not st or r['i1'] - r['i0'] > MAX_SPAN or r['v'] < 2:
+                    continue                    # < 2 km/h over minutes = parked or laid over, not traffic
                 h = dt.datetime.fromtimestamp(r['t'], IST).hour
                 fresh = now - r['t'] <= 3600
                 city_h[h].append(r['v'])
                 if fresh:
                     city_now.append(r['v'])
-                for i in range(r['i0'], min(r['i1'], len(st) - 2) + 1):
+                for i in range(max(1, r['i0']), min(r['i1'], len(st) - 3) + 1):   # not the terminus segments
                     k = f'{st[i]}|{st[i + 1]}'
                     hours[k][h].append(r['v'])
                     if fresh:

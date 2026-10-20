@@ -141,5 +141,50 @@ const BUSART = (() => {
     return canvas(100, 44, 6, g => side(g, L[k]), flip).toDataURL('image/png');
   }
   const topView = k => canvas(20, 48, 6, g => top(g, L[k])).toDataURL('image/png');
-  return { L, of, register, portrait, topView };
+
+  /* One texture for the WebGL bus layer: every livery top-down and side-on in
+     both directions, a soft round glow (tinted per bus in the shader) and the
+     AC snowflake. Returns the canvas and each sprite's UV rectangle. */
+  function snowflake(g, cx, cy, r) {
+    g.save(); g.translate(cx, cy); g.lineCap = 'round';
+    for (const [w, col] of [[r * 0.34, '#ffffff'], [r * 0.16, '#2f86d6']]) {   // white halo, then the flake
+      g.strokeStyle = col; g.lineWidth = w;
+      for (let k = 0; k < 6; k++) {
+        g.save(); g.rotate(k * Math.PI / 3);
+        g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -r);
+        g.moveTo(0, -r * 0.55); g.lineTo(-r * 0.28, -r * 0.78);
+        g.moveTo(0, -r * 0.55); g.lineTo(r * 0.28, -r * 0.78);
+        g.stroke(); g.restore();
+      }
+    }
+    g.fillStyle = '#2f86d6'; g.beginPath(); g.arc(0, 0, r * 0.14, 0, 2 * Math.PI); g.fill();
+    g.restore();
+  }
+  function atlas() {
+    const S = 3, keys = Object.keys(L);
+    const W = 1024, rowH = 48 * S + 4, H = 64 + keys.length * rowH + 8;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'), uv = {};
+    const put = (key, x, y, w, h, draw, flip) => {
+      g.save(); g.translate(x, y);
+      if (flip) { g.translate(w, 0); g.scale(-1, 1); }
+      draw(g); g.restore();
+      uv[key] = [x / W, y / H, (x + w) / W, (y + h) / H];
+    };
+    // glow: a radial falloff in white, coloured per bus by the shader
+    put('glow', 0, 0, 64, 64, gg => {
+      const r = gg.createRadialGradient(32, 32, 0, 32, 32, 32);
+      r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.35, 'rgba(255,255,255,.55)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+      gg.fillStyle = r; gg.fillRect(0, 0, 64, 64);
+    });
+    put('snow', 68, 0, 56, 56, gg => snowflake(gg, 28, 28, 22));
+    keys.forEach((k, i) => {
+      const y = 64 + i * rowH;
+      put('top-' + k, 0, y, 20 * S, 48 * S, gg => { gg.scale(S, S); top(gg, L[k]); });
+      put(`side-${k}-r`, 70, y, 100 * S, 44 * S, gg => { gg.scale(S, S); side(gg, L[k]); });
+      put(`side-${k}-l`, 380, y, 100 * S, 44 * S, gg => { gg.scale(S, S); side(gg, L[k]); }, true);
+    });
+    return { canvas: c, uv };
+  }
+  return { L, of, register, portrait, topView, atlas };
 })();

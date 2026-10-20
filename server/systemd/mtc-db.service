@@ -1,0 +1,10 @@
+[Unit]
+Description=MTC dashboard data (mtc.reclaimchennai.city/db) from the live archive
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/mtc-live
+ExecStart=/usr/bin/python3 db_build.py --site %h/projects/maps-site/mapsv2 --archive %h/projects/mtc-live/archive --roster %h/projects/mtc-live/roster --cmrl %h/projects/cmrl/data/cmrl.db
+Nice=10
+StandardOutput=append:%h/projects/mtc-live/logs/db.log
+StandardError=append:%h/projects/mtc-live/logs/db.log
