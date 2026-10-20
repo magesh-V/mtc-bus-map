@@ -502,6 +502,41 @@
     .lv-bars i { flex: 1; border-radius: 2px 2px 0 0; min-height: 2px; }
     .lv-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); padding: 3px 2px 0; font-variant-numeric: tabular-nums; }
     .lv-hero img { width: min(230px, 66%); margin: -14px 0 -10px; }
+    .lv-wc { background: #1f5fd6 !important; display: inline-flex; align-items: center; gap: 3px; }
+    .lv-stop { cursor: pointer; border-radius: 8px; transition: background .15s; }
+    .lv-stop:hover, .lv-stop:focus-visible { background: #f3eee4; outline: none; }
+    .lv-pin { color: #f01b48; display: inline-flex; }
+    .lv-report { display: inline-flex; align-items: center; gap: 5px; float: right; margin: -6px 0 0; border: 1px solid #e3dccd; background: #fff; color: #444;
+      font: inherit; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+    .lv-report:hover { border-color: #f01b48; color: #f01b48; }
+    .lv-stophead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 2px 0 6px; }
+    .lv-backbtn { display: inline-flex; align-items: center; gap: 5px; border: 0; background: #f3eee4; color: #333; font: inherit; font-size: 12.5px; font-weight: 600; border-radius: 999px; padding: 5px 11px; cursor: pointer; }
+    .lv-said { display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 4px 2px; color: #333; }
+    .lv-said span { margin-left: auto; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+    #card { transition: opacity .17s ease, transform .17s ease; }
+    #card.lv-out { opacity: 0; transform: translateX(14px); }
+    #card.lv-in { animation: lvin .26s cubic-bezier(.32,.72,0,1); }
+    @keyframes lvin { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+    #lv-sheet { position: fixed; inset: 0; z-index: 900; background: rgba(20,20,24,.32); display: none; align-items: flex-end; justify-content: center; }
+    #lv-sheet.open { display: flex; animation: lvfade .18s ease; }
+    @keyframes lvfade { from { opacity: 0; } }
+    .lv-sheetbox { width: min(440px, 100%); max-height: 86vh; overflow: auto; background: #fffdf8; border-radius: 20px 20px 0 0; padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
+      box-shadow: 0 -10px 40px rgba(0,0,0,.2); animation: lvup .26s cubic-bezier(.32,.72,0,1); }
+    @media (min-width: 700px) { #lv-sheet { align-items: center; } .lv-sheetbox { border-radius: 20px; } }
+    @keyframes lvup { from { transform: translateY(40px); opacity: 0; } }
+    .lv-sheethead { display: grid; grid-template-columns: 32px 1fr 32px; align-items: center; text-align: center; font-size: 16px; }
+    .lv-x { border: 0; background: #f3eee4; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; display: grid; place-items: center; font-size: 14px; color: #444; }
+    .lv-sub { text-align: center; font-size: 12.5px; color: var(--muted); margin: 6px 0 10px; }
+    .lv-glabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 12px 2px 6px; }
+    .lv-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+    .lv-tiles.two { grid-template-columns: 1fr 1fr; margin-top: 12px; }
+    .lv-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 84px; padding: 10px 8px; border: 1.5px solid #e7e0d2;
+      background: #fff; border-radius: 14px; font: inherit; font-size: 13px; font-weight: 600; color: #222; cursor: pointer; text-align: center; transition: transform .08s, border-color .15s; }
+    .lv-tile:hover { border-color: #f01b48; }
+    .lv-tile:active { transform: scale(.96); }
+    .lv-tile svg { color: #f01b48; }
+    .lv-thanks { display: flex; gap: 12px; align-items: center; font-size: 13.5px; color: #333; padding: 6px 2px; }
+    .lv-thanks svg { color: #2fa35a; flex: none; }
     .lv-note { font-size: 12px; color: var(--muted); padding: 6px 2px 2px; }
     .lv-btn { margin-top: 6px; border: 0; background: #f6f1e7; color: #333; font-weight: 600; border-radius: 9px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
     .lv-btn:hover { background: #efe8da; }
@@ -526,10 +561,28 @@
   /* ── cards ── */
   const hhmm = t => new Date(t * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
   const inMin = t => { const m = Math.round((t - now()) / 60); return m <= 0 ? 'due' : `${m} min`; };
+  /* Lucide icons (ISC licence), the set the rest of the map uses */
+  const ICON = {
+    access: '<circle cx="16" cy="4" r="1"/><path d="m18 19 1-7-6 1"/><path d="m5 8 3-3 5.5 3-2.36 3.5"/><path d="M4.24 14.5a5 5 0 0 0 6.88 6"/><path d="M13.76 17.5a5 5 0 0 0-6.88-6"/>',
+    flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
+    seat: '<path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/><path d="M3 16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v1.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5V11a2 2 0 0 0-4 0z"/><path d="M5 18v2"/><path d="M19 18v2"/>',
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    full: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    late: '<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+    early: '<polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/>',
+    noshow: '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/>',
+    skip: '<path d="m15 9-6 6"/><path d="M2.586 16.726A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2h6.624a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586z"/><path d="m9 9 6 6"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    back: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+    pin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+  };
+  const ic = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
+  // every low-floor bus, AC or not, has a ramp: the same blue step-free pill as the metro app
+  const wheel = fl => fl.includes('l') ? `<span class="lv-chip lv-wc" title="Low floor with a ramp — wheelchair accessible">${ic('access', 12)}Ramp</span>` : '';
   const chips = fl => {
     const v = BUSART.L[lvOf(fl)];
-    return `<span class="lv-chip" style="background:${v.key}">${v.name}</span>`
-      + (fl.includes('l') ? `<span class="lv-chip" style="background:#6b6b6b">Low floor</span>` : '')
+    return `<span class="lv-chip" style="background:${v.key}">${v.name}</span>` + wheel(fl)
       + (fl.includes('x') ? `<span class="lv-chip" style="background:#b8860b">Express</span>` : '')
       + (fl.includes('u') ? `<span class="lv-chip" style="background:#8a8a8e">Waiting for next trip</span>` : '');
   };
@@ -550,7 +603,7 @@
     $('card-sub').innerHTML = `Bus <b>${reg}</b> &middot; GPS ${ago(now() - fix)} ago<div style="margin-top:5px">${chips(fl)}</div>`;
     const t = now();
     const rows = eta.filter(([, et]) => et > t - 30).slice(0, 14).map(([i, et]) =>
-      `<div class="lv-row"><span></span><span class="meta"><b>${(st[i] && st[i][1]) || 'Stop'}</b></span><span class="when">${inMin(et)}<small>${hhmm(et)}</small></span></div>`).join('');
+      `<div class="lv-row lv-stop" data-i="${i}" role="button" tabindex="0"><span class="lv-pin">${ic('pin', 14)}</span><span class="meta"><b>${(st[i] && st[i][1]) || 'Stop'}</b></span><span class="when">${inMin(et)}<small>${hhmm(et)}</small></span></div>`).join('');
     const facing = posOf(tr, now(), [0, 0, 0])[2];
     const hNow = new Date(Date.now() + 19800000).getUTCHours(), cr = crowdOf(code, hNow);
     let crowdHTML = '';
@@ -561,15 +614,23 @@
         + `<div class="lv-crowd"><span style="color:${CROWD_COL[cr.level]}">${PEOPLE} <b>${CROWD_NAMES[cr.level]}</b></span>`
         + `<span>${Math.round(cr.p * 100)}% chance you'll stand</span></div>`
         + `<div class="lv-bars" title="Estimated crowding by hour on this working">${bars.map((x, h) => `<i style="height:${x == null ? 2 : Math.max(2, 100 * x / mx)}%;background:${x == null ? '#e7e2d6' : CROWD_COL[x < 0.75 ? 0 : x < 1.3 ? 1 : 2]};${h === hNow ? 'outline:1.5px solid #1c1c1e;outline-offset:1px' : ''}"></i>`).join('')}</div>`
-        + `<div class="lv-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>`
-        + `<div class="lv-note">Not a passenger count: when Chennai travels (CMRL hourly tickets) against how many buses this working runs each hour.</div>`;
+        + `<div class="lv-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>`;
     }
     $('card-body').innerHTML = `<div class="lv-hero"><img alt="${BUSART.L[lvOf(fl)].name} bus" src="${BUSISO.portrait(lvOf(fl), cr ? cr.level : 1, (facing + 360) % 360)}"></div>`
+      + `<button class="lv-report" id="lv-report">${ic('flag', 14)}Report</button>`
+      + `<div id="lv-said"></div>`
       + crowdHTML
-      + `<div class="seclbl">Next stops (predicted)</div>`
+      + `<div class="seclbl">Next stops (predicted) · tap a stop</div>`
       + (rows || '<div class="lv-note">At the end of its trip.</div>')
       + `<button class="lv-btn" id="lv-route">Show route ${sn}</button>`;
     $('lv-route').addEventListener('click', () => { cardBus = null; selectRoute(sn, code); });
+    $('lv-report').addEventListener('click', () => report({ reg, route: code, sn, fl, stop: '', stop_name: '', lat: tr.v[2], lon: tr.v[3] }));
+    $('card-body').querySelectorAll('.lv-stop').forEach(el => {
+      const go = () => goToStop(st[+el.dataset.i], reg);
+      el.addEventListener('click', go);
+      el.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    });
+    said({ reg });
   }
 
   // which route-stop entries sit at this physical stop (stops are merged by location on the map)
@@ -627,14 +688,141 @@
 
   // add a live section to every stop card
   const baseOpenStop = openStop;
-  openStop = function (f) {
+  openStop = function (f, opts = {}) {
     baseOpenStop(f);
     cardBus = null; selReg = null;
     cardStop = f.geometry.coordinates;
+    if (opts.fly) map.flyTo({ center: cardStop, zoom: Math.max(map.getZoom(), 16), duration: 1100, essential: true });
+    const head = document.createElement('div');
+    head.className = 'lv-stophead';
+    head.innerHTML = (opts.fromBus ? `<button class="lv-backbtn" id="lv-back">${ic('back', 14)}Bus ${opts.fromBus}</button>` : '<span></span>')
+      + `<button class="lv-report" id="lv-report-stop" style="margin:0">${ic('flag', 14)}Report</button>`;
     const box = document.createElement('div'); box.id = 'lv-arrivals'; box.style.marginBottom = '12px';
-    $('card-body').prepend(box);
+    const saidBox = document.createElement('div'); saidBox.id = 'lv-said';
+    $('card-body').prepend(head, saidBox, box);
+    if (opts.fromBus) $('lv-back').addEventListener('click', () => swapCard(() => {
+      const tr = TRACK.get(opts.fromBus); if (!tr) return;
+      openBus(opts.fromBus);
+      const p = posOf(tr, now(), [0, 0, 0]); map.flyTo({ center: [p[0], p[1]], zoom: Math.max(map.getZoom(), 15), duration: 900 });
+    }));
+    const keys = stopKeys(cardStop[0], cardStop[1]);
+    const stopCode = keys.length ? stopsOf(keys[0][0])[keys[0][1]][0] : '';
+    const stopName = f.properties['Stop Name'] || '';
+    $('lv-report-stop').addEventListener('click', () => report({ stop: stopCode, stop_name: stopName, lat: cardStop[1], lon: cardStop[0], atStop: true }));
+    if (stopCode) said({ stop: stopCode });
     paintStopArrivals();
   };
+
+  /* bus card -> stop card: fly to the stop and slide the card across */
+  function swapCard(fn) {
+    const c = $('card');
+    c.classList.add('lv-out');
+    setTimeout(() => { fn(); c.classList.remove('lv-out'); c.classList.add('lv-in'); setTimeout(() => c.classList.remove('lv-in'), 260); }, 170);
+  }
+  function goToStop(s, fromBus) {
+    if (!s) return;
+    const [code, name, lat, lon] = s;
+    // the map's stop pins are merged by place; take the one at this stop
+    let best = null, bd = 120;
+    for (const f of (STOPS && STOPS.features) || []) {
+      const c = f.geometry.coordinates, d = Math.hypot((c[0] - lon) * K * Math.cos(lat * Math.PI / 180), (c[1] - lat) * K);
+      if (d < bd) { bd = d; best = f; }
+    }
+    const f = best || { type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] }, properties: { 'Stop Name': name, 'route name': '[]' } };
+    swapCard(() => openStop(f, { fly: true, fromBus }));
+  }
+
+  /* ── rider reports: tap, tap, done ── */
+  const SAY = {
+    seats: { label: 'How full is it?', opts: {
+      free: ['seat', 'Seats free', { many: 'Lots of seats', some: 'A few seats', few: 'One or two' }],
+      standing: ['users', 'Standing', { some: 'A few standing', crowded: 'Crowded aisle', packed: 'Packed' }],
+      full: ['full', 'Full', { boarded: 'I got on', squeezed: 'Squeezed in', left_behind: "Couldn't get on" }] } },
+    timing: { label: 'Is it on time?', opts: {
+      on_time: ['clock', 'On time', null],
+      late: ['late', 'Late', { lt5: 'Under 5 min', '5_15': '5–15 min', '15_30': '15–30 min', gt30: '30+ min' }],
+      early: ['early', 'Early', { lt5: 'Under 5 min', '5_15': '5–15 min', gt15: '15+ min' }],
+      no_show: ['noshow', "Didn't come", { 15: 'Waited 15 min', 30: 'Waited 30 min', 60: 'An hour or more' }],
+      skipped: ['skip', "Didn't stop", { did_not_stop: 'Drove past', full: 'Too full to stop' }] } },
+    access: { label: 'Ramp and access', opts: {
+      ramp_ok: ['access', 'Ramp worked', null], ramp_broken: ['access', "Ramp didn't work", null], not_low_floor: ['access', 'Not low floor', null] } },
+  };
+  const sheet = document.createElement('div');
+  sheet.id = 'lv-sheet';
+  document.body.appendChild(sheet);
+  sheet.addEventListener('click', e => { if (e.target === sheet) sheet.classList.remove('open'); });
+  function report(ctx) {
+    const pickBus = () => {
+      // at a stop: which bus? (the next arrivals here, or none listed)
+      const keys = stopKeys(ctx.lon, ctx.lat), want = new Set(keys.map(k => k[0])), t = now(), arr = [];
+      for (const [reg, tr] of TRACK) if (want.has(tr.v[1])) {
+        const e = tr.v[7].find(([i, et]) => keys.some(k => k[0] === tr.v[1] && k[1] === i) && et > t - 600 && et < t + 2400);
+        if (e) arr.push([e[1], reg, tr]);
+      }
+      arr.sort((a, b) => a[0] - b[0]);
+      return arr.slice(0, 6);
+    };
+    const tile = (k, icon, label, cls = '') => `<button class="lv-tile ${cls}" data-k="${k}">${ic(icon, 26)}<span>${label}</span></button>`;
+    const frame = (title, body, back) => {
+      sheet.innerHTML = `<div class="lv-sheetbox" role="dialog" aria-label="Report">`
+        + `<div class="lv-sheethead">${back ? `<button class="lv-x" data-back>${ic('back', 18)}</button>` : '<span></span>'}<b>${title}</b><button class="lv-x" data-close>✕</button></div>`
+        + `<div class="lv-sub">${ctx.sn ? `${tagHTML(ctx.sn)} ` : ''}${ctx.reg ? `Bus <b>${ctx.reg}</b>` : ''}${ctx.stop_name ? ` · ${ctx.stop_name}` : ''}</div>${body}</div>`;
+      sheet.querySelector('[data-close]').onclick = () => sheet.classList.remove('open');
+      if (back) sheet.querySelector('[data-back]').onclick = back;
+      sheet.classList.add('open');
+    };
+    const send = (kind, value, detail) => {
+      frame('Sending…', '<div class="lv-note">One moment.</div>');
+      fetch('api/report', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind, value, detail, reg: ctx.reg || '', route: ctx.route || '', sn: ctx.sn || '', stop: ctx.stop || '', stop_name: ctx.stop_name || '', lat: ctx.lat, lon: ctx.lon }) })
+        .then(r => r.ok ? r.json() : Promise.reject(r.status))
+        .then(() => {
+          frame('Thank you', `<div class="lv-thanks">${ic('check', 34)}<div>Saved. Other riders see it for the next 90 minutes, and it helps check the crowding estimate.</div></div>`
+            + `<div class="lv-tiles two"><button class="lv-tile" data-again>${ic('flag', 22)}<span>Report something else</span></button><button class="lv-tile" data-done>${ic('check', 22)}<span>Done</span></button></div>`);
+          sheet.querySelector('[data-again]').onclick = step1;
+          sheet.querySelector('[data-done]').onclick = () => sheet.classList.remove('open');
+          said(ctx.reg ? { reg: ctx.reg } : { stop: ctx.stop }, true);
+        })
+        .catch(e => frame("Couldn't send", `<div class="lv-note">${e === 429 ? 'That is a lot of reports from this phone — thank you, please try later.' : 'No connection to the server. Please try again.'}</div>`, step1));
+    };
+    const step2 = (kind, value) => {
+      const [icon, label, more] = SAY[kind].opts[value];
+      if (!more) return send(kind, value, '');
+      frame(label, `<div class="lv-tiles">${Object.entries(more).map(([d, l]) => tile(d, icon, l)).join('')}</div>`, step1);
+      sheet.querySelectorAll('.lv-tile').forEach(b => b.onclick = () => send(kind, value, b.dataset.k));
+    };
+    const step1 = () => {
+      const groups = Object.entries(SAY).filter(([k]) => k !== 'access' || ctx.fl == null || ctx.fl.includes('l'))
+        .map(([k, g]) => `<div class="lv-glabel">${g.label}</div><div class="lv-tiles">${Object.entries(g.opts)
+          .filter(([v]) => ctx.atStop || v !== 'no_show').map(([v, [icon, label]]) => tile(`${k}:${v}`, icon, label)).join('')}</div>`).join('');
+      frame('Report', groups, ctx.atStop ? () => { Object.assign(ctx, { reg: '', route: '', sn: '', fl: undefined }); pick(); } : null);
+      sheet.querySelectorAll('.lv-tile').forEach(b => b.onclick = () => { const [k, v] = b.dataset.k.split(':'); step2(k, v); });
+    };
+    const pick = () => {
+      const buses = pickBus();
+      frame('Which bus?', `<div class="lv-tiles">${buses.map(([et, reg, tr]) => `<button class="lv-tile" data-reg="${reg}">${tagHTML(snOf(tr.v[1]))}<span>${reg} · ${inMin(et)}</span></button>`).join('')}`
+        + `<button class="lv-tile" data-reg="">${ic('noshow', 26)}<span>A bus that isn't listed</span></button></div>`);
+      sheet.querySelectorAll('[data-reg]').forEach(b => b.onclick = () => {
+        const tr = TRACK.get(b.dataset.reg);
+        if (tr) Object.assign(ctx, { reg: b.dataset.reg, route: tr.v[1], sn: snOf(tr.v[1]), fl: tr.v[6] });
+        step1();
+      });
+    };
+    ctx.atStop && !ctx.reg ? pick() : step1();
+  }
+  // what riders said recently, on the bus or stop card
+  const NAMES = {};
+  for (const [k, g] of Object.entries(SAY)) for (const [v, [, l, more]] of Object.entries(g.opts)) { NAMES[k + ':' + v] = l; for (const [d, dl] of Object.entries(more || {})) NAMES[`${k}:${v}:${d}`] = dl; }
+  function said(q, fresh) {
+    const box = $('lv-said'); if (!box) return;
+    const qs = q.reg ? `reg=${encodeURIComponent(q.reg)}` : `stop=${encodeURIComponent(q.stop)}`;
+    fetch(`api/recent?${qs}&t=${fresh ? Date.now() : Math.floor(Date.now() / 60000)}`).then(r => r.ok ? r.json() : null).then(j => {
+      if (!j || !j.reports || !j.reports.length || !$('lv-said')) return;
+      const last = j.reports.slice(-3).reverse();
+      $('lv-said').innerHTML = `<div class="seclbl">Riders said</div>` + last.map(([k, v, d, m, sn]) =>
+        `<div class="lv-said">${ic(SAY[k].opts[v][0], 14)}<b>${NAMES[k + ':' + v]}</b>${d ? ` · ${NAMES[`${k}:${v}:${d}`]}` : ''}${sn && !q.reg ? ` · ${sn}` : ''}<span>${m < 1 ? 'just now' : m + ' min ago'}</span></div>`).join('');
+    }).catch(() => {});
+  }
   $('card-close').addEventListener('click', () => { cardStop = cardBus = selReg = null; update(); });
   const baseSelect = selectRoute;
   selectRoute = function (...a) { cardStop = cardBus = selReg = null; return baseSelect.apply(this, a); };

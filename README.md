@@ -16,7 +16,8 @@ to every rider's phone, read at a polite rate.
 | **Routes** | 970 MTC services over 3,713 scheduled workings, each road-matched (OSRM over OpenStreetMap). Tap a line for its workings, stops and timings. |
 | **Departures by hour** | Two 12-hour dials per working: day (6 am–6 pm) and night (6 pm–6 am). |
 | **Live buses** | Every bus Chennai One is tracking, as a 3D model in its real livery — Switch EiV12 electric AC (red) and non-AC (cyan/purple), standard-floor diesel (sky blue), diesel AC, premium — glowing while it moves, a snowflake over AC buses, passengers behind the glass at the estimated crowd level. Drawn on a WebGL layer, only for buses in view. Between GPS fixes each bus moves along its route on the app's own predicted stop times; it never leaves before it must and is never drawn going backwards. |
-| **Live arrivals** | Every stop card lists the tracked buses due in the next 90 minutes. |
+| **Live arrivals** | Every stop card lists the tracked buses due in the next 90 minutes; low-floor buses carry a wheelchair ramp pill. Tap a next stop on a bus card to fly there. |
+| **Rider reports** | A Report button on bus and stop cards: how full, on time or not, did the ramp work — a few taps, no typing. Served by `server/report_api.py` (`server/mtc-reports.sh`); fixed answers only, no free text, IP addresses never stored. |
 | **Crowding (estimated)** | MTC publishes no hourly ticket counts; crowding is CMRL's hourly ticket profile (when Chennai travels) against how many buses each working runs that hour. Labelled as an estimate everywhere. |
 | **Dashboard** | [`/db`](https://mtc.reclaimchennai.city/db/): buses on the road by hour, observed speeds, slowest corridors, bus bunching by hour / route / place, crowding, the day's roster, fares. Rebuilt hourly from the archive (`server/db_build.py`). |
 | **Traffic (observed)** | Bus speed per stop-to-stop road segment from the live fleet's GPS — last hour, or typical by hour over the past week. Not a timetable estimate. |
@@ -37,6 +38,7 @@ server/    runs on the web host
   live_speeds.py           per-segment speed medians -> live/speeds.json (every 10 min)
   daily_harvest.py         new network snapshots + the day's bus roster (05:30 IST)
   db_build.py              dashboard data: fleet, speeds, bunching, crowding, roster
+  report_api.py            rider reports (POST /api/report, GET /api/recent)
   fare_harvest.py          every class's fare per stop pair (/frfs/search quotes all classes at once)
   harvest_fast.py api.py   timetable harvest for a new snapshot
   live_sweep.py            one raw fleet-wide capture
