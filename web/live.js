@@ -340,6 +340,7 @@
       const v = tr.v;
       // cull on the fix first (cheap); a bus moves a few km at most between polls
       if (reg !== selReg && (v[3] < W - 0.05 || v[3] > E + 0.05 || v[2] < S_ - 0.05 || v[2] > N + 0.05)) continue;
+      if (reg !== selReg && !passes(v[6])) continue;
       const prevD = tr.lastD;
       if (city && !tr.ready) {
         // city view: the GPS fix as-is — no route geometry built, nothing to animate
@@ -471,6 +472,15 @@
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && on) poll(); });
 
+  /* ── filters in the top pill: tap a bus type to hide or show it, or show
+     only wheelchair-accessible buses. LIVE itself stays a status. ── */
+  const GROUPS = [['diesel', 'bus', 'Diesel'], ['dieselAC', 'snow', 'AC'], ['ev', 'bolt', 'Electric'], ['evAC', 'bolt', 'Electric AC']];
+  const groupOf = fl => { const lv = lvOf(fl); return lv === 'premium' ? 'evAC' : lv; };
+  const FILT = (() => { try { const j = JSON.parse(localStorage.getItem('mtcLiveFilter') || '{}'); return { off: j.off || [], wc: !!j.wc }; } catch (e) { return { off: [], wc: false }; } })();
+  const saveFilt = () => { try { localStorage.setItem('mtcLiveFilter', JSON.stringify(FILT)); } catch (e) {} };
+  const passes = fl => !FILT.off.includes(groupOf(fl)) && (!FILT.wc || fl.includes('l'));
+  const filtered = () => FILT.off.length > 0 || FILT.wc;
+
   /* ── status pill ── */
   const css = document.createElement('style');
   css.textContent = `
@@ -482,10 +492,7 @@
     #live-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #f01b48; box-shadow: 0 0 0 0 rgba(240,27,72,.5); animation: lpulse 1.8s infinite; }
     #live-pill.stale .dot { background: #aaa; animation: none; }
     #live-pill b { font-weight: 700; letter-spacing: .04em; }
-    #live-pill .key { display: flex; gap: 7px; margin-left: 2px; color: #666; }
-    #live-pill .key i { display: inline-block; width: 6px; height: 13px; border-radius: 3px 3px 1.5px 1.5px; margin-right: 3px; vertical-align: -1px; }
     @keyframes lpulse { 70% { box-shadow: 0 0 0 7px rgba(240,27,72,0); } 100% { box-shadow: 0 0 0 0 rgba(240,27,72,0); } }
-    @media (max-width: 640px) { #live-pill .key { display: none; } }
     @media (prefers-reduced-motion: reduce) { #live-pill .dot { animation: none; } }
     .lv-row { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 7px 2px; border-bottom: 1px solid #efe9de; }
     .lv-row:last-child { border-bottom: 0; }
@@ -502,7 +509,19 @@
     .lv-bars i { flex: 1; border-radius: 2px 2px 0 0; min-height: 2px; }
     .lv-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); padding: 3px 2px 0; font-variant-numeric: tabular-nums; }
     .lv-hero img { width: min(230px, 66%); margin: -14px 0 -10px; }
-    .lv-wc { background: #1f5fd6 !important; display: inline-flex; align-items: center; gap: 3px; }
+    .lv-ico { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 6px; color: #fff; margin-right: 4px; vertical-align: -4px; }
+    #live-pill { pointer-events: auto; max-width: calc(100vw - 150px); }
+    #live-pill .lv-live { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+    #live-pill .key { display: flex; gap: 3px; margin-left: 2px; color: #555; overflow-x: auto; scrollbar-width: none; }
+    #live-pill .key::-webkit-scrollbar { display: none; }
+    .lv-f { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; font: inherit; font-size: 12px; color: #444; padding: 3px 6px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+    .lv-f:hover { background: #f1ece2; }
+    .lv-f i { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 5px; color: #fff; }
+    .lv-f.off { color: #aaa; text-decoration: line-through; }
+    .lv-f.off i { background: #cfcac0 !important; }
+    .lv-f.wc { border: 1px solid #d9e3f7; }
+    .lv-f.wc.on { background: #1f5fd6; color: #fff; border-color: #1f5fd6; }
+    @media (max-width: 640px) { .lv-f span { display: none; } .lv-f { padding: 3px 4px; } }
     .lv-stop { cursor: pointer; border-radius: 8px; transition: background .15s; }
     .lv-stop:hover, .lv-stop:focus-visible { background: #f3eee4; outline: none; }
     .lv-pin { color: #f01b48; display: inline-flex; }
@@ -551,11 +570,24 @@
     const age = FEED ? Math.max(0, Math.round(now() - FEED.t)) : null;
     const stale = err || !FEED || age > 180;
     pillEl.classList.toggle('stale', stale);
-    pillEl.innerHTML = `<span class="dot"></span><b>LIVE</b>` + (FEED
-      ? `<span>${FEED.v.length.toLocaleString('en-IN')} buses${stale ? ` · ${Math.round(age / 60)} min old` : ''}</span>`
-      : `<span>${err ? 'live feed unavailable' : 'connecting…'}</span>`)
-      + `<span class="key">${['diesel', 'dieselAC', 'ev', 'evAC'].map(k => `<span><i style="background:${BUSART.L[k].key}"></i>${BUSART.L[k].name}</span>`).join('')}</span>`;
+    const shown = FEED ? FEED.v.filter(v => passes(v[6])).length : 0;
+    const count = FEED ? (filtered() ? `${shown.toLocaleString('en-IN')} of ${FEED.v.length.toLocaleString('en-IN')}` : FEED.v.length.toLocaleString('en-IN')) + ' buses' : '';
+    pillEl.innerHTML = `<span class="lv-live"><span class="dot"></span><b>LIVE</b>` + (FEED
+      ? `<span>${count}${stale ? ` · ${Math.round(age / 60)} min old` : ''}</span>`
+      : `<span>${err ? 'live feed unavailable' : 'connecting…'}</span>`) + `</span>`
+      + `<span class="key">${GROUPS.map(([g, icon, name]) => `<button class="lv-f${FILT.off.includes(g) ? ' off' : ''}" data-g="${g}" aria-pressed="${!FILT.off.includes(g)}" title="${FILT.off.includes(g) ? 'Show' : 'Hide'} ${name} buses"><i style="background:${BUSART.L[g].key}">${ic(icon, 10)}</i><span>${name}</span></button>`).join('')}`
+      + `<button class="lv-f wc${FILT.wc ? ' on' : ''}" data-wc aria-pressed="${FILT.wc}" title="${FILT.wc ? 'Show all buses' : 'Show only wheelchair-accessible buses'}"><i style="background:#1f5fd6">${ic('access', 10)}</i><span>Accessible</span></button></span>`;
   }
+  pillEl.addEventListener('click', e => {
+    const b = e.target.closest('.lv-f'); if (!b) return;
+    if (b.dataset.g) {
+      const g = b.dataset.g, i = FILT.off.indexOf(g);
+      if (i >= 0) FILT.off.splice(i, 1); else FILT.off.push(g);
+      if (FILT.off.length === GROUPS.length) FILT.off = FILT.off.filter(x => x !== g);   // never hide everything
+    } else FILT.wc = !FILT.wc;
+    saveFilt(); pill(); update(); labels(true);
+    if (cardStop) paintStopArrivals();
+  });
   setInterval(() => on && FEED && pill(), 15000);
 
   /* ── cards ── */
@@ -576,13 +608,21 @@
     check: '<path d="M20 6 9 17l-5-5"/>',
     back: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
     pin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+    snow: '<line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/><path d="m20 16-4-4 4-4"/><path d="m4 8 4 4-4 4"/><path d="m16 4-4 4-4-4"/><path d="m8 20 4-4 4 4"/>',
+    bolt: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+    bus: '<path d="M8 6v6M15 6v6M2 12h19.6M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/>',
   };
   const ic = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
-  // every low-floor bus, AC or not, has a ramp: the same blue step-free pill as the metro app
-  const wheel = fl => fl.includes('l') ? `<span class="lv-chip lv-wc" title="Low floor with a ramp — wheelchair accessible">${ic('access', 12)}Ramp</span>` : '';
+  /* Bus features as icon badges, not words: a bolt for electric, a snowflake
+     for AC, the metro app's step-free icon for low floor (every low-floor bus,
+     AC or not, has a ramp). A diesel non-AC bus has no badge at all. */
+  const badge = (k, bg, title) => `<span class="lv-ico" style="background:${bg}" title="${title}" aria-label="${title}">${ic(k, 12)}</span>`;
   const chips = fl => {
-    const v = BUSART.L[lvOf(fl)];
-    return `<span class="lv-chip" style="background:${v.key}">${v.name}</span>` + wheel(fl)
+    const lv = lvOf(fl);
+    return (fl.includes('e') ? badge('bolt', lv === 'evAC' || lv === 'premium' ? '#e2343c' : '#5a2ad0', 'Electric') : '')
+      + (fl.includes('a') ? badge('snow', '#2c62b8', 'AC') : '')
+      + (fl.includes('l') ? badge('access', '#1f5fd6', 'Low floor with a ramp — wheelchair accessible') : '')
+      + (fl.includes('p') ? `<span class="lv-chip" style="background:#b3803f">Premium</span>` : '')
       + (fl.includes('x') ? `<span class="lv-chip" style="background:#b8860b">Express</span>` : '')
       + (fl.includes('u') ? `<span class="lv-chip" style="background:#8a8a8e">Waiting for next trip</span>` : '');
   };
@@ -592,7 +632,18 @@
     const tr = TRACK.get(reg); if (!tr) return;
     selReg = reg; cardBus = reg; cardStop = null;
     if (selStopMarker) { selStopMarker.remove(); selStopMarker = null; }
-    showCard(); paintBus(reg); update();
+    showCard(); paintBus(reg); showBusRoute(tr.v[1]); update();
+  }
+  // trace the bus's own working on the map, the way tapping a route does
+  function showBusRoute(code) {
+    const f = codeFeat(code); if (!f || !map.getSource('sel')) return;
+    const sn = snOf(code);
+    selMarkers.forEach(m => m.remove()); selMarkers = [];
+    map.getSource('sel').setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: f.geometry, properties: { ...f.properties, color: f.properties.color || hashColor(sn) } }] });
+    map.setPaintProperty('routes', 'line-opacity', 0.18);
+    map.setPaintProperty('sel-line', 'line-width', 5);
+    map.setPaintProperty('sel-glow', 'line-width', 14); map.setPaintProperty('sel-glow', 'line-blur', 8);
+    map.setLayoutProperty('sel-arrows', 'visibility', 'visible');
   }
   function paintBus(reg) {
     const tr = TRACK.get(reg);
@@ -670,6 +721,8 @@
       for (const [i, et] of tr.v[7]) if (s.has(i) && et > t - 30 && et < t + 5400) { arr.push({ reg, code: tr.v[1], et, fl: tr.v[6] }); break; }
     }
     arr.sort((a, b) => a.et - b.et);
+    const hidden = arr.filter(a => !passes(a.fl)).length;
+    arr.splice(0, arr.length, ...arr.filter(a => passes(a.fl)));
     const rows = arr.slice(0, 12).map(a => {
       const f = codeFeat(a.code), dest = f ? f.properties.destinatio : '';
       return `<div class="lv-row" data-reg="${a.reg}" style="cursor:pointer">${tagHTML(snOf(a.code), f && f.properties.category)}`
@@ -678,6 +731,7 @@
     }).join('');
     box.innerHTML = `<div class="seclbl">Live arrivals · next 90 min</div>`
       + (rows || `<div class="lv-note">No tracked bus is due here in the next 90 minutes. Not every bus reports its position.</div>`)
+      + (hidden ? `<div class="lv-note">${hidden} more bus${hidden === 1 ? '' : 'es'} hidden by the filters in the top bar.</div>` : '')
       + (rows ? `<div class="lv-note">Predicted by Chennai One from each bus's GPS. Tap a bus to follow it.</div>` : '');
     box.querySelectorAll('[data-reg]').forEach(el => el.addEventListener('click', () => {
       const tr = TRACK.get(el.dataset.reg); if (!tr) return;
