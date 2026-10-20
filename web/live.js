@@ -41,6 +41,7 @@
   const lvOf = fl => BUSART.of(fl), lvCol = fl => BUSART.L[lvOf(fl)].key;
   let on = (() => { try { return localStorage.getItem('mtcLive') !== '0'; } catch (e) { return true; } })();
   let FEED = null, pollT = null, running = false, CODE_FEAT = null;
+  const fetchT0 = Date.now();
   let selReg = null, cardStop = null, cardBus = null;
   const GEO = new Map(), TRACK = new Map();
   const now = () => Date.now() / 1000;
@@ -258,9 +259,9 @@
   const mercX = lng => (lng + 180) / 360;
   const mercY = lat => (180 - (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))) / 360;
 
-  function quad(mx, my, w, h, uv, rot, r, g, b, a, dy = 0) {
+  function quad(mx, my, w, h, uv, rot, r, g, b, a, dy = 0, dx = 0) {
     if ((nverts + 6) * STRIDE > vbuf.length) { const nb = new Float32Array(vbuf.length * 2); nb.set(vbuf); vbuf = nb; }
-    const x0 = -w / 2, x1 = w / 2, y0 = -h / 2 + dy, y1 = h / 2 + dy;
+    const x0 = -w / 2 + dx, x1 = w / 2 + dx, y0 = -h / 2 + dy, y1 = h / 2 + dy;
     const P = [[x0, y0, uv[0], uv[1]], [x1, y0, uv[2], uv[1]], [x1, y1, uv[2], uv[3]], [x0, y0, uv[0], uv[1]], [x1, y1, uv[2], uv[3]], [x0, y1, uv[0], uv[3]]];
     for (const [ox, oy, u, v] of P) {
       const o = nverts++ * STRIDE;
@@ -334,7 +335,7 @@
     const hourNow = new Date(Date.now() + 19800000).getUTCHours();
     const pulseT = CALM ? 0 : t * 2.4;
     ref = [mercX((b.getWest() + b.getEast()) / 2), mercY((b.getNorth() + b.getSouth()) / 2)];
-    const glows = [], buses = [], snows = [];
+    const glows = [], buses = [], snows = [], zzs = [];
     VIS = [];
     for (const [reg, tr] of TRACK) {
       const v = tr.v;
@@ -361,6 +362,16 @@
       const dir = Math.round((((h - bearing) % 360 + 360) % 360) / 22.5) % 16;
       const cr = crowdOf(v[1], hourNow), lvl = cr ? cr.level : 1;
       buses.push([mx, my, `${lv}:${dir}:${lvl}`]);
+      // parked at a terminus (or waiting for its next trip): it sleeps
+      if (z >= 13 && t - (tr.moving || 0) > 90) {
+        const st = stopsOf(v[1]);
+        let sleep = fl.includes('u');
+        if (!sleep && st && st.length > 1) {
+          const cx = K * Math.cos(lat * Math.PI / 180), far = s_ => Math.hypot((s_[3] - lng) * cx, (s_[2] - lat) * K);
+          sleep = Math.min(far(st[0]), far(st[st.length - 1])) < 250;
+        }
+        if (sleep) zzs.push([mx, my, (reg.charCodeAt(reg.length - 1) % 10) / 10]);
+      }
       if (snowZ && fl.includes('a')) snows.push([mx, my, -(AY * s + snowPx * 0.55)]);
       VIS.push([reg, lng, lat, Math.max(14, 12 * 9 * s * 0.45)]);
     }
@@ -369,6 +380,11 @@
     buses.sort((p, q) => p[1] - q[1]);              // back to front: farther (higher on screen) first
     for (const [mx, my, key] of buses) quad(mx, my, bw, bh, UV[key], -1000, 1, 1, 1, 1, lift);
     for (const [mx, my, dy] of snows) quad(mx, my, snowPx, snowPx, UV.snow, -1000, 1, 1, 1, 1, dy);
+    // three z's drifting up and fading, out of phase with each other and other buses
+    if (UV.zzz) for (const [mx, my, ph0] of zzs) for (let k = 0; k < 3; k++) {
+      const ph = ((CALM ? 0.5 : t * 0.45) + k / 3 + ph0) % 1, sz = (10 + 10 * ph) * Math.max(1, s * 1.8);
+      quad(mx, my, sz, sz, UV.zzz, -1000, 1, 1, 1, Math.sin(Math.PI * ph) * 0.95, -(AY * s + 4 + 26 * ph), 6 + 12 * ph);
+    }
     glLayer.dirty = true;
     map.triggerRepaint();
   }
@@ -444,7 +460,7 @@
       FEED = parse(j);
       ingest(FEED); update(); labels(true); pill();
       if (cardStop) paintStopArrivals();
-      if (cardBus) paintBus(cardBus);
+      if (cardBus) paintBus(cardBus, false);
     }).catch(() => { pill(true); });
   }
   function ensureStops() {
@@ -509,7 +525,29 @@
     .lv-bars i { flex: 1; border-radius: 2px 2px 0 0; min-height: 2px; }
     .lv-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); padding: 3px 2px 0; font-variant-numeric: tabular-nums; }
     .lv-hero img { width: min(230px, 66%); margin: -14px 0 -10px; }
+    #card .chead { padding-right: 84px; }
+    #card .lv-share { right: 48px; display: none; place-items: center; }
+    #card .lv-share.on { display: grid; }
+    #lv-toast { position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); opacity: 0; z-index: 950;
+      background: #1c1c1e; color: #fff; font-size: 13px; padding: 9px 14px; border-radius: 999px; transition: opacity .2s, transform .2s; pointer-events: none; }
+    #lv-toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .lv-busline { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+    #lv-busbar { margin-bottom: 10px; }
+    #lv-busbar .lv-report { margin-top: 0; }
+    .rail.lv-live li.passed .rl.out .dot { background: var(--red); }
+    .rail.lv-live li.passed .lbl.out .nm { color: #9a958b; }
+    .rail.lv-live li.next .rl.out .dot { background: var(--red); animation: lvblink 1.1s ease-in-out infinite; }
+    .rail.lv-live li.next .lbl.out .nm { color: var(--red); font-weight: 800; }
+    @keyframes lvblink { 0%, 100% { box-shadow: 0 0 0 0 rgba(240,27,72,.55); background: var(--red); } 50% { box-shadow: 0 0 0 7px rgba(240,27,72,0); background: #fff; } }
+    .rail.lv-live .cap.next .capdot { animation: lvblink 1.1s ease-in-out infinite; }
+    .lv-eta { display: block; font-size: 11px; font-weight: 700; color: var(--red); font-variant-numeric: tabular-nums; margin-top: 1px; }
+    .rail.lv-live li:not(.next) .lv-eta { color: var(--muted); font-weight: 600; }
+    @media (prefers-reduced-motion: reduce) { .rail.lv-live li.next .rl.out .dot, .rail.lv-live .cap.next .capdot { animation: none; } }
     .lv-ico { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 6px; color: #fff; margin-right: 4px; vertical-align: -4px; }
+    .lv-ico.ac { color: #1677d2; box-shadow: inset 0 0 0 1.2px #8cc6f5; }
+    .lv-ico.ac svg { stroke-width: 2.4; }
+    .lv-f[data-g="dieselAC"] i { background: #e4f3ff !important; color: #1677d2; box-shadow: inset 0 0 0 1px #8cc6f5; }
+    .lv-f[data-g="dieselAC"].off i { background: #cfcac0 !important; color: #fff; box-shadow: none; }
     #live-pill { pointer-events: auto; max-width: calc(100vw - 150px); }
     #live-pill .lv-live { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
     #live-pill .key { display: flex; gap: 3px; margin-left: 2px; color: #555; overflow-x: auto; scrollbar-width: none; }
@@ -610,17 +648,19 @@
     pin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
     snow: '<line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/><path d="m20 16-4-4 4-4"/><path d="m4 8 4 4-4 4"/><path d="m16 4-4 4-4-4"/><path d="m8 20 4-4 4 4"/>',
     bolt: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+    share: '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/>',
     bus: '<path d="M8 6v6M15 6v6M2 12h19.6M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/>',
   };
   const ic = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
   /* Bus features as icon badges, not words: a bolt for electric, a snowflake
      for AC, the metro app's step-free icon for low floor (every low-floor bus,
      AC or not, has a ramp). A diesel non-AC bus has no badge at all. */
-  const badge = (k, bg, title) => `<span class="lv-ico" style="background:${bg}" title="${title}" aria-label="${title}">${ic(k, 12)}</span>`;
+  const badge = (k, bg, title, cls = '') => `<span class="lv-ico${cls}" style="background:${bg}" title="${title}" aria-label="${title}">${ic(k, 12)}</span>`;
   const chips = fl => {
     const lv = lvOf(fl);
     return (fl.includes('e') ? badge('bolt', lv === 'evAC' || lv === 'premium' ? '#e2343c' : '#5a2ad0', 'Electric') : '')
-      + (fl.includes('a') ? badge('snow', '#2c62b8', 'AC') : '')
+      // AC: a blue snowflake on ice, so it never reads as the solid-blue wheelchair badge
+      + (fl.includes('a') ? badge('snow', '#e4f3ff', 'AC', ' ac') : '')
       + (fl.includes('l') ? badge('access', '#1f5fd6', 'Low floor with a ramp — wheelchair accessible') : '')
       + (fl.includes('p') ? `<span class="lv-chip" style="background:#b3803f">Premium</span>` : '')
       + (fl.includes('x') ? `<span class="lv-chip" style="background:#b8860b">Express</span>` : '')
@@ -628,11 +668,45 @@
   };
   const ago = s => s < 90 ? `${Math.max(0, Math.round(s))} s` : `${Math.round(s / 60)} min`;
 
+  /* ── shareable state: the address bar always holds a link to what is open,
+     and the Share button hands out the short link whose card WhatsApp, X and
+     Facebook can show (/r /s /b, served by share_api.py) ── */
+  const ORIGIN = 'https://mtc.reclaimchennai.city';
+  let SHARE = null;
+  function setShare(q, short, title) {
+    SHARE = { url: ORIGIN + short, title };
+    try { history.replaceState(null, '', q ? '?' + q : location.pathname); } catch (e) {}
+    shareBtn.classList.toggle('on', !!q);
+  }
+  const shareBtn = document.createElement('button');
+  shareBtn.className = 'cclose lv-share'; shareBtn.setAttribute('aria-label', 'Share'); shareBtn.title = 'Share';
+  shareBtn.innerHTML = ic('share', 15);
+  $('card-close').after(shareBtn);
+  const toast = msg => {
+    let t = $('lv-toast');
+    if (!t) { t = document.createElement('div'); t.id = 'lv-toast'; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
+  };
+  shareBtn.addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!SHARE) return;
+    if (navigator.share) { try { await navigator.share({ title: SHARE.title, text: SHARE.title, url: SHARE.url }); return; } catch (err) { if (err && err.name === 'AbortError') return; } }
+    try { await navigator.clipboard.writeText(SHARE.url); toast('Link copied'); } catch (err) { toast(SHARE.url); }
+  });
+
+  /* One card for a bus: its own header (route, destination, registration, GPS
+     age, badges, report, crowding) on top of the route card of the working it
+     is running — workings, timings and the stop diagram — with the bus's
+     progress drawn on that diagram. The map stays where the rider was looking. */
   function openBus(reg) {
     const tr = TRACK.get(reg); if (!tr) return;
-    selReg = reg; cardBus = reg; cardStop = null;
+    const code = tr.v[1], sn = snOf(code);
     if (selStopMarker) { selStopMarker.remove(); selStopMarker = null; }
-    showCard(); paintBus(reg); showBusRoute(tr.v[1]); update();
+    const cam = { center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
+    if (ROUTE_IDX[sn]) { baseSelect(sn, code); map.stop(); map.jumpTo(cam); } else showCard();
+    selReg = reg; cardBus = reg; cardStop = null;
+    paintBus(reg, true); showBusRoute(code); update();
+    setShare(`bus=${encodeURIComponent(reg)}`, `/b/${encodeURIComponent(reg)}`, `Bus ${reg} on route ${snOf(tr.v[1])} — live on the Chennai MTC map`);
   }
   // trace the bus's own working on the map, the way tapping a route does
   function showBusRoute(code) {
@@ -645,17 +719,19 @@
     map.setPaintProperty('sel-glow', 'line-width', 14); map.setPaintProperty('sel-glow', 'line-blur', 8);
     map.setLayoutProperty('sel-arrows', 'visibility', 'visible');
   }
-  function paintBus(reg) {
+  function paintBus(reg, first) {
     const tr = TRACK.get(reg);
-    if (!tr) { $('card-body').innerHTML = '<div class="lv-note">This bus is no longer reporting.</div>'; return; }
-    const [, code, , , , fix, fl, eta] = tr.v, sn = snOf(code), st = stopsOf(code) || [];
+    if (!tr) { const bb = $('lv-busbar'); if (bb) bb.innerHTML = '<div class="lv-note">This bus is no longer reporting.</div>'; return; }
+    const [, code, , , , fix, fl] = tr.v, sn = snOf(code), st = stopsOf(code) || [];
     const f = codeFeat(code), dest = f ? f.properties.destinatio : (st.length ? st[st.length - 1][1] : '');
     $('card-title').innerHTML = `${tagHTML(sn, f && f.properties.category)}<span class="ttl"><span>→ ${dest || ''}</span></span>`;
-    $('card-sub').innerHTML = `Bus <b>${reg}</b> &middot; GPS ${ago(now() - fix)} ago<div style="margin-top:5px">${chips(fl)}</div>`;
-    const t = now();
-    const rows = eta.filter(([, et]) => et > t - 30).slice(0, 14).map(([i, et]) =>
-      `<div class="lv-row lv-stop" data-i="${i}" role="button" tabindex="0"><span class="lv-pin">${ic('pin', 14)}</span><span class="meta"><b>${(st[i] && st[i][1]) || 'Stop'}</b></span><span class="when">${inMin(et)}<small>${hhmm(et)}</small></span></div>`).join('');
-    const facing = posOf(tr, now(), [0, 0, 0])[2];
+    $('card-sub').innerHTML = `<span class="lv-busline">${chips(fl)}Bus <b>${reg}</b> &middot; GPS ${ago(now() - fix)} ago</span>`;
+    let bar = $('lv-busbar');
+    if (!bar || first) {
+      if (bar) bar.remove();
+      bar = document.createElement('div'); bar.id = 'lv-busbar';
+      $('card-body').prepend(bar);
+    }
     const hNow = new Date(Date.now() + 19800000).getUTCHours(), cr = crowdOf(code, hNow);
     let crowdHTML = '';
     if (cr) {
@@ -667,22 +743,47 @@
         + `<div class="lv-bars" title="Estimated crowding by hour on this working">${bars.map((x, h) => `<i style="height:${x == null ? 2 : Math.max(2, 100 * x / mx)}%;background:${x == null ? '#e7e2d6' : CROWD_COL[x < 0.75 ? 0 : x < 1.3 ? 1 : 2]};${h === hNow ? 'outline:1.5px solid #1c1c1e;outline-offset:1px' : ''}"></i>`).join('')}</div>`
         + `<div class="lv-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>`;
     }
-    $('card-body').innerHTML = `<div class="lv-hero"><img alt="${BUSART.L[lvOf(fl)].name} bus" src="${BUSISO.portrait(lvOf(fl), cr ? cr.level : 1, (facing + 360) % 360)}"></div>`
-      + `<button class="lv-report" id="lv-report">${ic('flag', 14)}Report</button>`
-      + `<div id="lv-said"></div>`
-      + crowdHTML
-      + `<div class="seclbl">Next stops (predicted) · tap a stop</div>`
-      + (rows || '<div class="lv-note">At the end of its trip.</div>')
-      + `<button class="lv-btn" id="lv-route">Show route ${sn}</button>`;
-    $('lv-route').addEventListener('click', () => { cardBus = null; selectRoute(sn, code); });
+    bar.innerHTML = `<button class="lv-report" id="lv-report">${ic('flag', 14)}Report</button><div id="lv-said"></div>${crowdHTML}`;
     $('lv-report').addEventListener('click', () => report({ reg, route: code, sn, fl, stop: '', stop_name: '', lat: tr.v[2], lon: tr.v[3] }));
-    $('card-body').querySelectorAll('.lv-stop').forEach(el => {
-      const go = () => goToStop(st[+el.dataset.i], reg);
-      el.addEventListener('click', go);
-      el.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
-    });
     said({ reg });
+    railProgress(first);
   }
+
+  /* The bus's progress on the stop diagram: stops behind it filled, the stop it
+     is heading for blinking, the rest hollow with their predicted times. Runs on
+     every poll and every few seconds, so the blink moves on as the bus does. */
+  function railProgress(scroll, tries = 0) {
+    if (!cardBus) return;
+    const tr = TRACK.get(cardBus), rail = $('stops-wrap') && $('stops-wrap').querySelector('.rail');
+    if (!tr || !rail) { if (tries < 20) setTimeout(() => railProgress(scroll, tries + 1), 250); return; }
+    const t = now(), eta = new Map(tr.v[7].map(([i, et]) => [i, et]));
+    const upcoming = tr.v[7].filter(([, et]) => et > t - 20).map(([i]) => i);
+    const next = upcoming.length ? Math.min(...upcoming) : Infinity;
+    rail.classList.add('lv-live');
+    rail.querySelectorAll('[data-i]').forEach(el => {
+      const i = +el.dataset.i;
+      el.classList.toggle('passed', i < next);
+      el.classList.toggle('next', i === next);
+      if (el.tagName === 'LI' || el.classList.contains('capname')) {
+        let e = el.querySelector('.lv-eta');
+        const et = eta.get(i);
+        if (et != null && i >= next) {
+          if (!e) { e = document.createElement('span'); e.className = 'lv-eta'; (el.querySelector('.lbl.out') || el).appendChild(e); }
+          e.textContent = `${inMin(et)} · ${hhmm(et)}`;
+        } else if (e) e.remove();
+      }
+    });
+    if (!rail._lvWired) {
+      rail._lvWired = true;
+      rail.addEventListener('click', ev => {
+        const el = ev.target.closest('[data-i]'); if (!el || !cardBus) return;
+        const t2 = TRACK.get(cardBus), s2 = t2 && stopsOf(t2.v[1]);
+        if (s2 && s2[+el.dataset.i]) goToStop(s2[+el.dataset.i], cardBus);
+      });
+    }
+    if (scroll) { const n = rail.querySelector('li.next'); if (n) setTimeout(() => n.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120); }
+  }
+  setInterval(() => { if (cardBus && !document.hidden) railProgress(false); }, 5000);
 
   // which route-stop entries sit at this physical stop (stops are merged by location on the map)
   let STOP_GRID = null;
@@ -765,6 +866,8 @@
     $('lv-report-stop').addEventListener('click', () => report({ stop: stopCode, stop_name: stopName, lat: cardStop[1], lon: cardStop[0], atStop: true }));
     if (stopCode) said({ stop: stopCode });
     paintStopArrivals();
+    const key = `${cardStop[1].toFixed(5)},${cardStop[0].toFixed(5)}`;
+    setShare(`stop=${key}`, `/s/${key}`, `${stopName} — live bus arrivals on the Chennai MTC map`);
   };
 
   /* bus card -> stop card: fly to the stop and slide the card across */
@@ -877,9 +980,39 @@
         `<div class="lv-said">${ic(SAY[k].opts[v][0], 14)}<b>${NAMES[k + ':' + v]}</b>${d ? ` · ${NAMES[`${k}:${v}:${d}`]}` : ''}${sn && !q.reg ? ` · ${sn}` : ''}<span>${m < 1 ? 'just now' : m + ' min ago'}</span></div>`).join('');
     }).catch(() => {});
   }
-  $('card-close').addEventListener('click', () => { cardStop = cardBus = selReg = null; update(); });
+  $('card-close').addEventListener('click', () => { cardStop = cardBus = selReg = null; update(); setShare('', '', ''); });
   const baseSelect = selectRoute;
-  selectRoute = function (...a) { cardStop = cardBus = selReg = null; return baseSelect.apply(this, a); };
+  selectRoute = function (...a) {
+    cardStop = cardBus = selReg = null;
+    const out = baseSelect.apply(this, a);
+    const sn = a[0], e = ROUTE_IDX[sn], w = a[1] || (e && e.code) || '';
+    if (sn) setShare(`route=${encodeURIComponent(sn)}${w ? `&w=${w}` : ''}`, `/r/${encodeURIComponent(sn)}${w ? `?w=${w}` : ''}`, `Route ${sn}${e && e.source ? ` · ${e.source} → ${e.dest}` : ''} — Chennai MTC map`);
+    return out;
+  };
+
+  /* ── deep links: ?route= / ?stop= / ?bus= open what was shared ── */
+  (() => {
+    const q = new URLSearchParams(location.search);
+    const route = q.get('route'), w = q.get('w'), stop = q.get('stop'), bus = q.get('bus');
+    if (!route && !stop && !bus) return;
+    const until = (ok, then, ms = 40000) => { const t0 = Date.now(); const tick = () => { if (ok()) then(); else if (Date.now() - t0 < ms) setTimeout(tick, 250); else if (bus) toast('That bus is not reporting its position right now'); }; tick(); };
+    if (route) until(() => ROUTE_IDX[route] && dataReady, () => selectRoute(route, w || undefined));
+    else if (stop) until(() => STOPS && dataReady, () => {
+      const [lat, lon] = stop.split(',').map(Number);
+      let best = null, bd = 170;
+      for (const f of STOPS.features) { const c = f.geometry.coordinates, d = Math.hypot((c[0] - lon) * K * Math.cos(lat * Math.PI / 180), (c[1] - lat) * K); if (d < bd) { bd = d; best = f; } }
+      if (best) openStop(best, { fly: true });
+    });
+    else if (bus) {
+      if (!on) setOn(true);
+      // wait for the map data and the live feed; give the feed 30 s to bring this bus in
+      until(() => FEED && dataReady && Object.keys(ROUTE_IDX).length && (TRACK.has(bus) || Date.now() - fetchT0 > 30000), () => {
+        if (!TRACK.has(bus)) { toast('That bus is not reporting its position right now'); return; }
+        openBus(bus);
+        const p = posOf(TRACK.get(bus), now(), [0, 0, 0]); map.flyTo({ center: [p[0], p[1]], zoom: 15, duration: 1200 });
+      }, 60000);
+    }
+  })();
 
   /* ── toggle in the layer menu ── */
   const btn = document.createElement('button');

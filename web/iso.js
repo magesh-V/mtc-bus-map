@@ -247,7 +247,7 @@ const BUSISO = (() => {
      plus 'glow' and 'snow'. Returns {canvas, uv, cell: [CW, CH], anchor: [AX, AY]}. */
   function atlas(scale = 1.25, maxW = 4096) {
     const keys = Object.keys(BUSART.L), cw = Math.round(CW * scale), ch = Math.round(CH * scale);
-    const cols = Math.floor(maxW / cw), n = keys.length * 16 * 3 + 2, rows = Math.ceil(n / cols);
+    const cols = Math.floor(maxW / cw), n = keys.length * 16 * 3 + 3, rows = Math.ceil(n / cols);
     const c = document.createElement('canvas'); c.width = cols * cw; c.height = rows * ch;
     const g = c.getContext('2d'), uv = {};
     let i = 0;
@@ -268,6 +268,17 @@ const BUSISO = (() => {
       const sw = (u1 - u0) * fc.width, sh = (v1 - v0) * fc.height, side = Math.min(cw, ch);
       g.drawImage(fc, u0 * fc.width, v0 * fc.height, sw, sh, x, y, side, side);
       uv[k] = [x / c.width, y / c.height, (x + side) / c.width, (y + side) / c.height];
+    }
+    // a sleepy 'z' for buses parked at a terminus (drawn three at a time, drifting up)
+    {
+      const [x, y] = cell('zzz'), side = Math.min(cw, ch);
+      g.save(); g.translate(x + side / 2, y + side / 2);
+      g.font = `900 ${Math.round(side * 0.78)}px -apple-system, 'Segoe UI', Roboto, sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+      g.lineWidth = side * 0.12; g.strokeStyle = '#ffffff'; g.strokeText('z', 0, 0);
+      g.fillStyle = '#4b5a86'; g.fillText('z', 0, 0);
+      g.restore();
+      uv.zzz = [x / c.width, y / c.height, (x + side) / c.width, (y + side) / c.height];
     }
     return { canvas: c, uv, cell: [CW, CH], anchor: [AX, AY] };
   }

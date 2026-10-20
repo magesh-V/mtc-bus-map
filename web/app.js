@@ -3,7 +3,7 @@
 'use strict';
 
 const DATA = 'data';
-const DATA_V = '20261017';   // Chennai One snapshot the data/ files were built from; bumps every cache   // self-contained: the enriched Chennai One layers, not /mtc/data
+const DATA_V = '20261020b';   // Chennai One snapshot the data/ files were built from; bumps every cache   // self-contained: the enriched Chennai One layers, not /mtc/data
 const $ = id => document.getElementById(id);
 const parseRoutes = v => (Array.isArray(v) ? v
   : (() => { try { const j = JSON.parse(v); if (Array.isArray(j)) return j; } catch (e) {} return String(v || '').replace(/[[\]"']/g, '').split(',').map(s => s.trim()).filter(Boolean); })()
@@ -396,7 +396,7 @@ function markAC() {
 let ROUTE_STOPS;
 function renderStops(name, e) {
   const wrap = $('stops-wrap'); if (!wrap) return;
-  const wire = () => wrap.querySelectorAll('.rail li, .stopline li').forEach(li => li.addEventListener('click', () => {
+  const wire = () => wrap.querySelectorAll('.rail li, .stopline li, .rail .capname[data-x]').forEach(li => li.addEventListener('click', () => {
     if (li.dataset.x) map.flyTo({ center: [+li.dataset.x, +li.dataset.y], zoom: 16, duration: 600 });
   }));
   const draw = () => {
@@ -406,14 +406,19 @@ function renderStops(name, e) {
       return;
     }
     const dir = rs.d[0];
-    const back = (e.works || [])
-      .filter(w => w.properties.code !== e.code)
-      .map(w => ROUTE_STOPS[w.properties.code])
-      .find(o => o && o.d && o.d[0] && o.d[0].e === dir.o && o.d[0].o === dir.e);
+    // the return working: its ends are this working's ends swapped. CUMTA writes
+    // the same terminus in different cases ("TAMBARAM WEST BUS STAND" / "Tambaram
+    // West Bus Stand"), so compare names loosely, then by place (within 300 m)
+    const nk = x => (x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const near = (a, b) => a && b && Math.hypot((a[3] - b[3]) * 108000, (a[2] - b[2]) * 111000) < 300;
+    const cands = (e.works || []).filter(w => w.properties.code !== e.code)
+      .map(w => ROUTE_STOPS[w.properties.code]).filter(o => o && o.d && o.d[0] && o.d[0].s && o.d[0].s.length > 1);
+    const back = cands.find(o => nk(o.d[0].e) === nk(dir.o) && nk(o.d[0].o) === nk(dir.e))
+      || cands.find(o => near(o.d[0].s[o.d[0].s.length - 1], dir.s[0]) && near(o.d[0].s[0], dir.s[dir.s.length - 1]));
     // the return leg runs the other way; reversing it puts each stop beside the
     // outbound stop it actually pairs with
     const rev = back ? back.d[0].s.slice().reverse() : null;
-    const key = st => (st[1] || '').trim().toUpperCase();
+    const key = st => (st[1] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const pool = new Map();
     if (rev) rev.forEach(st => { if (!pool.has(key(st))) pool.set(key(st), st); });
 
@@ -429,20 +434,25 @@ function renderStops(name, e) {
         const last = i === dir.s.length - 1;
         const arw = (i % 3 === 1 && !last) ? '<span class="arw dn"></span>' : '';
         const cls = (i === 0 ? ' stop-start' : '') + (last ? ' stop-end' : '');
-        return `<li class="grid ${i === 0 || last ? 'term' : ''}" data-y="${st[2]}" data-x="${st[3]}">`
-          + `<div class="rl${cls}"><span class="dot"></span>${arw}</div>`
-          + `<div class="lbl">${cell(st)}</div></li>`;
+        return `<li class="grid ${i === 0 || last ? 'term' : ''}" data-i="${i}" data-y="${st[2]}" data-x="${st[3]}">`
+          + `<div class="rl out${cls}"><span class="dot"></span>${arw}</div>`
+          + `<div class="lbl out">${cell(st)}</div></li>`;
       }).join('');
       wrap.innerHTML =
         `<div class="rail single">`
-        + `<div class="grid hdr"><div></div><div>${dir.o} \u2192 ${dir.e}</div></div>`
         + `<ul>${rows}</ul></div>`
         + `<div class="tmsg" style="padding:10px 2px">One-way service — CUMTA publishes no return working for it.</div>`;
       wire();
       return;
     }
 
+    /* The termini live in the U-turn caps: a dot at the top of each loop and the
+       name once beside it. They used to appear three times each (column header,
+       cap label and the first row of both rails). */
+    const t0 = dir.s[0], t1 = dir.s[dir.s.length - 1];
+    pool.delete(key(t0)); pool.delete(key(t1));
     const rows = dir.s.map((st, i) => {
+      if (i === 0 || i === dir.s.length - 1) return '';
       const last = i === dir.s.length - 1;
       const m = pool.get(key(st));
       if (m) pool.delete(key(st));
@@ -452,9 +462,9 @@ function renderStops(name, e) {
       // no stop-end: the rail now runs on into the U-turn at the far terminus,
       // the same way it runs out of the one at the near end
       const lcls = '';
-      return `<li class="grid ${i === 0 || last ? 'term' : ''}" data-y="${st[2]}" data-x="${st[3]}">`
-        + `<div class="lbl l">${cell(st)}</div>`
-        + `<div class="rl${lcls}"><span class="dot"></span>${dn}</div>`
+      return `<li class="grid" data-i="${i}" data-y="${st[2]}" data-x="${st[3]}">`
+        + `<div class="lbl l out">${cell(st)}</div>`
+        + `<div class="rl out${lcls}"><span class="dot"></span>${dn}</div>`
         + `<div class="link${m ? '' : ' none'}"></div>`
         + `<div class="rl${lcls}"><span class="dot${m ? '' : ' blank'}"></span>${up}</div>`
         + `<div class="lbl r">${cell(m)}</div></li>`;
@@ -462,13 +472,12 @@ function renderStops(name, e) {
     const left = pool.size;
     wrap.innerHTML =
       `<div class="rail">`
-      + `<div class="grid hdr"><div class="l">${dir.o} \u2192 ${dir.e}</div><div></div><div></div><div></div>`
-      + `<div class="r">${back.d[0].o} \u2192 ${back.d[0].e}</div></div>`
-      + `<div class="grid"><div class="capname">${dir.s[0][1]}</div></div>`
-      + `<div class="grid"><div></div><div class="cap"></div><div></div></div>`
+      + `<div class="grid"><div class="capname" data-i="0" data-y="${t0[2]}" data-x="${t0[3]}">${t0[1]}</div></div>`
+      + `<div class="grid"><div></div><div class="cap" data-i="0"><span class="capdot"></span></div><div></div></div>`
+      + `<div class="grid hdr"><div class="l">Going</div><div></div><div></div><div></div><div class="r">Coming back</div></div>`
       + `<ul>${rows}</ul>`
-      + `<div class="grid"><div></div><div class="cap btm"></div><div></div></div>`
-      + `<div class="grid"><div class="capname">${dir.s[dir.s.length - 1][1]}</div></div></div>`
+      + `<div class="grid"><div></div><div class="cap btm" data-i="${dir.s.length - 1}"><span class="capdot"></span></div><div></div></div>`
+      + `<div class="grid"><div class="capname" data-i="${dir.s.length - 1}" data-y="${t1[2]}" data-x="${t1[3]}">${t1[1]}</div></div></div>`
       + (left ? `<div class="tmsg" style="padding:10px 2px">${left} stop${left === 1 ? '' : 's'} on the return leg have no counterpart here — the two directions do not use identical stops.</div>` : '');
     wire();
   };

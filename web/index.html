@@ -5,6 +5,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
   <title>Chennai MTC Bus Explorer</title>
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Chennai MTC Buses">
+  <meta property="og:title" content="Chennai MTC Buses — every route, every live bus">
+  <meta property="og:description" content="Every Chennai MTC bus route and stop, every live bus moving on the map, the next bus at every stop, real road speeds and fares.">
+  <meta property="og:url" content="https://mtc.reclaimchennai.city/">
+  <meta property="og:image" content="https://mtc.reclaimchennai.city/og/site.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Chennai MTC Buses — every route, every live bus">
+  <meta name="twitter:description" content="Every Chennai MTC bus route and stop, every live bus moving on the map, the next bus at every stop, real road speeds and fares.">
+  <meta name="twitter:image" content="https://mtc.reclaimchennai.city/og/site.png">
   <meta name="description" content="A vector-map explorer for every Chennai MTC bus route and stop — tap a stop for the buses that pass, tap a route to trace it, with live route numbers along the lines.">
   <link rel="icon" href="../mtc/favicon.svg">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
@@ -177,7 +189,7 @@
     .rail .grid { display: grid; grid-template-columns: 1fr var(--rail) var(--mid) var(--rail) 1fr;
       column-gap: 9px; align-items: center; }
     .rail .hdr { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-      color: var(--muted); margin-bottom: 4px; align-items: end; }
+      color: var(--muted); margin: 2px 0 2px; align-items: end; }
     .rail .hdr .l { text-align: right; } .rail .hdr .r { text-align: left; }
 
     /* the rail cell: line and dot share one box, so they cannot drift apart */
@@ -192,16 +204,30 @@
     .rail li.term .dot { background: var(--red); }
     .rail .dot.blank { border-color: #dcd6c8; }
 
-    /* terminus U-turn, spanning the two rail columns */
+    /* terminus U-turn, spanning the two rail columns, with the terminus itself
+       as a dot at the top of the loop. Drawn twice: grey for the whole loop and
+       red over its left half, so only the outbound side is red. */
+    .rail { --back: #d4cec2; }
     .rail .cap { grid-column: 2 / 5; height: 24px; position: relative; }
-    .rail .cap::before { content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+    .rail .cap::before, .rail .cap::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%);
       width: calc(var(--rail) + var(--mid) + 18px - 2.5px); height: 20px; bottom: 0;
-      border: 2.5px solid var(--red); border-bottom: 0; border-radius: 999px 999px 0 0; }
+      border: 2.5px solid var(--back); border-bottom: 0; border-radius: 999px 999px 0 0; }
+    .rail .cap::after { border-color: var(--red); clip-path: inset(0 50% 0 0); }
     /* the same U-turn at the far terminus, so both ends read alike */
-    .rail .cap.btm::before { bottom: auto; top: 0; border: 2.5px solid var(--red);
+    .rail .cap.btm::before, .rail .cap.btm::after { bottom: auto; top: 0; border: 2.5px solid var(--back);
       border-top: 0; border-radius: 0 0 999px 999px; }
+    .rail .cap.btm::after { border-color: var(--red); }
+    .rail .capdot { position: absolute; z-index: 2; left: 50%; top: -4px; transform: translateX(-50%); width: 13px; height: 13px;
+      border-radius: 50%; background: var(--red); border: 2.5px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.08); box-sizing: border-box; }
+    .rail .cap.btm .capdot { top: auto; bottom: -4px; }
     .rail .capname { grid-column: 1 / 6; text-align: center; font-size: 12.5px; font-weight: 800;
-      color: var(--ink); padding-bottom: 2px; }
+      color: var(--ink); padding: 0 0 4px; cursor: pointer; }
+    .rail .capname:hover { color: var(--red); }
+    .rail .grid:last-child .capname { padding: 4px 0 0; }
+    /* the return leg is the other direction: grey like its stop names */
+    .rail li .rl:nth-of-type(4)::before { background: var(--back); }
+    .rail li .rl:nth-of-type(4) .dot { border-color: var(--back); }
+    .rail li .rl:nth-of-type(4) .arw.up { border-bottom-color: var(--back); }
 
     /* One-way services: CUMTA publishes no return working for them, and drawing
        an empty second rail with a U-turn cap into it implied a round trip that
@@ -405,10 +431,10 @@
     <div class="cscroll" id="card-body"></div>
   </div>
 
-  <script src="app.js?v=31"></script>
+  <script src="app.js?v=36"></script>
   <script src="buses.js?v=3"></script>
-  <script src="iso.js?v=1"></script>
-  <script src="live.js?v=14"></script>
+  <script src="iso.js?v=2"></script>
+  <script src="live.js?v=19"></script>
   <script src="traffic.js?v=2"></script>
 </body>
 
