@@ -30,7 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, 'gtfs_clean')
 MODES = ('mtc', 'cmrl', 'suburban')
 FILES = ('agency.txt', 'calendar.txt', 'feed_info.txt', 'routes.txt',
-         'stops.txt', 'stop_times.txt', 'trips.txt', 'shapes.txt')
+         'stops.txt', 'stop_times.txt', 'trips.txt', 'shapes.txt',
+         'fare_attributes.txt', 'fare_rules.txt', 'pathways.txt')
 
 # 1 m: below the ~4 m positional accuracy of the road centrelines the routes are
 # matched against, so it cannot move a line off its road.
