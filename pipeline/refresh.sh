@@ -30,5 +30,7 @@ python3 build_gtfs_clean.py --vt METRO  --out gtfs_clean/cmrl     --zip
 python3 build_gtfs_clean.py --vt SUBWAY --out gtfs_clean/suburban --zip
 # station codes, entrances, CMRL fares, suburban service days and Sunday trains from CUMTA's GTFS
 python3 enrich_from_cumta.py --cmrl gtfs_clean/cmrl --cumta-cmrl cumta_20260202/cmrl --suburban gtfs_clean/suburban --cumta-suburban cumta_20260202/suburban
+# every rail trip's shape cut to run from its first stop to its last
+python3 fit_rail_shapes.py gtfs_clean/cmrl gtfs_clean/suburban
 python3 build_map_layers.py --out "out_$D/mapsv2"
 python3 build_timings.py    --out "out_$D/mapsv2/timings.json"
