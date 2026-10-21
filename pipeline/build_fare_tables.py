@@ -8,16 +8,11 @@ Stop ids are the deduplicated GTFS stop_ids of gtfs_clean/{mtc,cmrl,suburban}
 (the same clustering build_gtfs_clean.py uses), so the tables join to the feeds.
 
 mtc_fare_stages.csv
-    One row per stop of each harvested MTC working: its fare stage counted from
-    the working's first stop, and the fare from the first stop in every class.
-    Every MTC class is a fixed function of that stage s (verified on every
-    quote harvested; see README):
-        Ordinary, Small Bus Ordinary   4 + s
-        Express, Small Bus Express     floor(1.5 x Ordinary)
-        Deluxe                         2 x Ordinary + 1
-        AC                             slab of Ordinary: 5-6 -> 15, 7-9 -> 20,
-                                       10-12 -> 30, 13-16 -> 40, 17-18 -> 50,
-                                       19-20 -> 60, 21+ -> 60/70
+    One row per stop of each harvested MTC working: the fare from the working's
+    first stop in every class. Its `fare_stage` here is only Ordinary - 4, which is
+    MTC's stage up to stage 11 and not beyond (the fare then rises Rs 1 every two
+    stages) - run build_official_fares.py afterwards: it replaces it with the
+    official stage range from MTC's published table (mtcbus.tn.gov.in/Home/fares).
 cmrl_fares.csv        every station pair: adult fare and the in-app (QR) price
 suburban_fares.csv    every station pair served: fare per class and category
 """

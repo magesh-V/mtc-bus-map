@@ -1,0 +1,18 @@
+[Unit]
+Description=MTC live buses from the MTC app's backend (Chalo), politely -> mapsv2/live/vehicles.json + GPS archive
+After=network-online.target
+Wants=network-online.target
+Conflicts=mtc-live.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/mtc-live
+ExecStart=/usr/bin/python3 chalo_collector.py --stops %h/projects/maps-site/mapsv2/data/route_stops.json --timings %h/projects/maps-site/mapsv2/data/timings.json --stop-dist %h/projects/maps-site/mapsv2/data/stop_dist.json --routes %h/projects/mtc-live/chalo_routes.json --archive %h/projects/mtc-live/archive --out %h/projects/maps-site/mapsv2/live/vehicles.json --rate 2 --workers 2
+Restart=always
+RestartSec=60
+Nice=5
+StandardOutput=append:%h/projects/mtc-live/logs/chalo.log
+StandardError=append:%h/projects/mtc-live/logs/chalo.log
+
+[Install]
+WantedBy=default.target

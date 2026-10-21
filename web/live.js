@@ -606,12 +606,14 @@
     if (!on) { pillEl.classList.remove('show'); return; }
     pillEl.classList.add('show');
     const age = FEED ? Math.max(0, Math.round(now() - FEED.t)) : null;
-    const stale = err || !FEED || age > 180;
+    const paused = FEED && FEED.v.length === 0;               // the collector has no buses (source down or paused)
+    const stale = err || !FEED || age > 180 || paused;
     pillEl.classList.toggle('stale', stale);
     const shown = FEED ? FEED.v.filter(v => passes(v[6])).length : 0;
     const count = FEED ? (filtered() ? `${shown.toLocaleString('en-IN')} of ${FEED.v.length.toLocaleString('en-IN')}` : FEED.v.length.toLocaleString('en-IN')) + ' buses' : '';
-    pillEl.innerHTML = `<span class="lv-live"><span class="dot"></span><b>LIVE</b>` + (FEED
-      ? `<span>${count}${stale ? ` · ${Math.round(age / 60)} min old` : ''}</span>`
+    pillEl.innerHTML = `<span class="lv-live"><span class="dot"></span><b>LIVE</b>` + (paused
+      ? `<span>paused — reconnecting to the live feed</span>`
+      : FEED ? `<span>${count}${stale ? ` · ${Math.round(age / 60)} min old` : ''}</span>`
       : `<span>${err ? 'live feed unavailable' : 'connecting…'}</span>`) + `</span>`
       + `<span class="key">${GROUPS.map(([g, icon, name]) => `<button class="lv-f${FILT.off.includes(g) ? ' off' : ''}" data-g="${g}" aria-pressed="${!FILT.off.includes(g)}" title="${FILT.off.includes(g) ? 'Show' : 'Hide'} ${name} buses"><i style="background:${BUSART.L[g].key}">${ic(icon, 10)}</i><span>${name}</span></button>`).join('')}`
       + `<button class="lv-f wc${FILT.wc ? ' on' : ''}" data-wc aria-pressed="${FILT.wc}" title="${FILT.wc ? 'Show all buses' : 'Show only wheelchair-accessible buses'}"><i style="background:#1f5fd6">${ic('access', 10)}</i><span>Accessible</span></button></span>`;
@@ -833,7 +835,7 @@
     box.innerHTML = `<div class="seclbl">Live arrivals · next 90 min</div>`
       + (rows || `<div class="lv-note">No tracked bus is due here in the next 90 minutes. Not every bus reports its position.</div>`)
       + (hidden ? `<div class="lv-note">${hidden} more bus${hidden === 1 ? '' : 'es'} hidden by the filters in the top bar.</div>` : '')
-      + (rows ? `<div class="lv-note">Predicted by Chennai One from each bus's GPS. Tap a bus to follow it.</div>` : '');
+      + (rows ? `<div class="lv-note">Estimated from each bus's GPS (MTC app feed) and its distance to the stop. Tap a bus to follow it.</div>` : '');
     box.querySelectorAll('[data-reg]').forEach(el => el.addEventListener('click', () => {
       const tr = TRACK.get(el.dataset.reg); if (!tr) return;
       openBus(el.dataset.reg);

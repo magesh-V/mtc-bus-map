@@ -149,14 +149,14 @@
 
   <section>
     <h2>Fares</h2>
-    <p class="sub">From Chennai One's own fare search, every stop pair of every working (75,257 quotes). Every class is a fixed function of the Ordinary fare, which rises ₹1 a stage.</p>
-    <div class="card"><div class="legend"><span><i style="background:var(--green)"></i>Ordinary</span><span><i style="background:var(--amber)"></i>Express</span><span><i style="background:var(--purple)"></i>Deluxe</span><span><i style="background:var(--blue)"></i>AC</span></div>
-      <svg class="chart" id="c-fare"></svg><div class="cap">Fare in rupees by fare stage from the boarding stop. Data: <a href="https://github.com/reclaimchennai/ChennaiGTFS/tree/chennai-one-feeds/data/chennai-one/fares">ChennaiGTFS fares</a>.</div></div>
+    <p class="sub">MTC's published stage fares for one adult, in force since 29 Jan 2018 (G.O. Ms. No. 48). A stage is about 2 km. Ordinary rises ₹1 a stage to stage 11, then ₹1 every two stages.</p>
+    <div class="card"><div class="legend"><span><i style="background:var(--green)"></i>Ordinary · Pink</span><span><i style="background:var(--amber)"></i>Express · Small</span><span><i style="background:var(--purple)"></i>Deluxe · Night · E/V Deluxe · Ula Vintage</span><span><i style="background:var(--blue)"></i>E/V A/C · Ula A/C</span></div>
+      <svg class="chart" id="c-fare"></svg><div class="cap">Fare in rupees by stages travelled; MTC notes a ₹1 cess collected per passenger. Premium: ₹50, 75, 100, 125, 150 for stages 1–5. Chennai Ula day pass: ₹50 Vintage, ₹100 A/C. Source: <a href="https://mtcbus.tn.gov.in/Home/fares">MTC fare list</a> · per-stop fares of every working: <a href="https://github.com/reclaimchennai/ChennaiGTFS/tree/chennai-one-feeds/data/chennai-one/fares">ChennaiGTFS fares</a>.</div></div>
   </section>
 
   <footer>
-    <p><b>How this is collected.</b> A collector polls Chennai One for every running route at 4 requests a second and archives each bus's GPS fix; this page is rebuilt from that archive every hour. Speeds and bunching need two fixes of the same bus, a few minutes apart. Buses that do not report GPS are not counted.</p>
-    <p>Data: CUMTA / MTC via the Chennai One app; CMRL Commuter Archive for travel by hour. Code and data: <a href="https://github.com/reclaimchennai/mtc-bus-map">reclaimchennai/mtc-bus-map</a> · Live map: <a href="../">mtc.reclaimchennai.city</a> · By <a href="https://reclaimchennai.city">Reclaim Chennai</a>.</p>
+    <p><b>How this is collected.</b> A collector polls the official MTC app's live feed (Chalo) route by route at 2 requests a second — until 20 Oct 2026 it read Chennai One — and archives each bus's GPS fix; this page is rebuilt from that archive every hour. Speeds and bunching need two fixes of the same bus, a few minutes apart. Buses that do not report GPS are not counted.</p>
+    <p>Data: CUMTA / MTC via the Chennai One app; live positions via the MTC app (Chalo); fares from MTC's published fare list; CMRL Commuter Archive for travel by hour. Code and data: <a href="https://github.com/reclaimchennai/mtc-bus-map">reclaimchennai/mtc-bus-map</a> · Live map: <a href="../">mtc.reclaimchennai.city</a> · By <a href="https://reclaimchennai.city">Reclaim Chennai</a>.</p>
   </footer>
 </div>
 <div class="tip" id="tip"></div>
@@ -276,21 +276,20 @@ fetch('data.json?t=' + Math.floor(Date.now() / 600000)).then(r => r.json()).then
     plainBars($('c-tpb'), R.trips_per_bus.map(t => t[0] >= 20 ? '20+' : String(t[0])), R.trips_per_bus.map(t => t[1]), { fmtv: v => fmt(v) + ' buses', labelEvery: 2, W: 420, h: 230 });
   }
 
-  // fares from the rules (exact on every harvested quote)
-  const st = Array.from({ length: 20 }, (_, i) => i + 1), ord = st.map(s => 4 + s);
-  const ac = o => o <= 6 ? 15 : o <= 9 ? 20 : o <= 12 ? 30 : o <= 16 ? 40 : o <= 18 ? 50 : o <= 20 ? 60 : o <= 22 ? 70 : 80;
-  (() => {
-    const svg = $('c-fare'), W = 720, h = 220, m = { l: 34, r: 8, t: 10, b: 22 };
+  // fares: MTC's published stage table
+  fetch('../data/mtc_fares_official.json?v=20261021').then(r => r.json()).then(({ fares: F }) => {
+    const svg = $('c-fare'), W = 720, h = 220, m = { l: 34, r: 8, t: 10, b: 22 }, N = F.ordinary.length;
     svg.setAttribute('viewBox', `0 0 ${W} ${h}`); svg.innerHTML = '';
-    const series = [[ord, css('--green'), 'Ordinary'], [ord.map(o => Math.floor(1.5 * o)), css('--amber'), 'Express'], [ord.map(o => 2 * o + 1), css('--purple'), 'Deluxe'], [ord.map(ac), css('--blue'), 'AC']];
-    const top = 85, x = i => m.l + (W - m.l - m.r) * i / 19, y = v => m.t + (h - m.t - m.b) * (1 - v / top);
+    const series = [[F.ordinary, css('--green'), 'Ordinary · Pink'], [F.express, css('--amber'), 'Express · Small'],
+      [F.deluxe, css('--purple'), 'Deluxe · Night · E/V Deluxe · Ula Vintage'], [F.ev_ac, css('--blue'), 'E/V A/C · Ula A/C']];
+    const top = 85, x = i => m.l + (W - m.l - m.r) * i / (N - 1), y = v => m.t + (h - m.t - m.b) * (1 - v / top);
     for (let v = 0; v <= 80; v += 20) { svg.append(S('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: 'grid-line' })); svg.append(S('text', { x: m.l - 6, y: y(v) + 3.5, 'text-anchor': 'end' }, '₹' + v)); }
     for (const [vals, col, name] of series) {
       svg.append(S('path', { d: vals.map((v, i) => `${i ? 'L' : 'M'}${x(i)} ${y(v)}`).join(''), fill: 'none', stroke: col, 'stroke-width': 2.5 }));
-      vals.forEach((v, i) => { const c = S('circle', { cx: x(i), cy: y(v), r: 3.2, fill: col }); hover(c, `Stage ${i + 1} · ${name} <b>₹${v}</b>`); svg.append(c); });
+      vals.forEach((v, i) => { const c = S('circle', { cx: x(i), cy: y(v), r: 2.8, fill: col }); hover(c, `Stage ${i + 1} · ${name} <b>₹${v}</b>`); svg.append(c); });
     }
-    st.forEach((s, i) => { if (i % 2 === 0) svg.append(S('text', { x: x(i), y: h - 6, 'text-anchor': 'middle' }, 'stage ' + s)); });
-  })();
+    for (let i = 0; i < N; i += 3) svg.append(S('text', { x: x(i), y: h - 6, 'text-anchor': 'middle' }, 'stage ' + (i + 1)));
+  });
 
   // map: slow corridors (real road shapes) + bunching hotspots
   const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/positron', center: [80.22, 13.03], zoom: 10.3, attributionControl: { compact: true } });
