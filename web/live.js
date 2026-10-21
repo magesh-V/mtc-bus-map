@@ -43,6 +43,7 @@
   let FEED = null, pollT = null, running = false, CODE_FEAT = null;
   const fetchT0 = Date.now();
   let selReg = null, cardStop = null, cardBus = null;
+  let focusSn = null;                      // a route picked from search or the map: its buses stay in colour
   const GEO = new Map(), TRACK = new Map();
   const now = () => Date.now() / 1000;
 
@@ -238,35 +239,40 @@
 
   /* ── WebGL layer ── */
   const VS = `
-    attribute vec2 a_pos; attribute vec2 a_off; attribute vec2 a_uv; attribute float a_rot; attribute vec4 a_col;
+    attribute vec2 a_pos; attribute vec2 a_off; attribute vec2 a_uv; attribute float a_rot; attribute vec4 a_col; attribute float a_gray;
     uniform mat4 u_matrix; uniform vec2 u_view; uniform float u_bearing;
-    varying vec2 v_uv; varying vec4 v_col;
+    varying vec2 v_uv; varying vec4 v_col; varying float v_gray;
     void main() {
       vec4 p = u_matrix * vec4(a_pos, 0.0, 1.0);
       float r = radians(a_rot) - u_bearing * step(-500.0, a_rot);
       if (a_rot < -500.0) r = 0.0;
       vec2 o = vec2(a_off.x * cos(r) - a_off.y * sin(r), a_off.x * sin(r) + a_off.y * cos(r));
       p.xy += vec2(o.x, -o.y) * 2.0 / u_view * p.w;
-      gl_Position = p; v_uv = a_uv; v_col = a_col;
+      gl_Position = p; v_uv = a_uv; v_col = a_col; v_gray = a_gray;
     }`;
   const FS = `
-    precision mediump float; uniform sampler2D u_tex; varying vec2 v_uv; varying vec4 v_col;
-    void main() { gl_FragColor = texture2D(u_tex, v_uv) * v_col; }`;
-  const STRIDE = 12;                       // pos2 off2 uv2 rot1 col4 + pad1
+    precision mediump float; uniform sampler2D u_tex; varying vec2 v_uv; varying vec4 v_col; varying float v_gray;
+    void main() {
+      vec4 c = texture2D(u_tex, v_uv) * v_col;
+      // a bus that is not the one picked: black and white, a little faded (premultiplied alpha)
+      float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+      gl_FragColor = mix(c, vec4(vec3(l), c.a) * 0.6, v_gray);
+    }`;
+  const STRIDE = 12;                       // pos2 off2 uv2 rot1 col4 gray1
   let vbuf = new Float32Array(STRIDE * 6 * 4096), nverts = 0, ref = [0.5, 0.5], UV = null;
   const hex = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
   const COLS = {};
   const mercX = lng => (lng + 180) / 360;
   const mercY = lat => (180 - (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))) / 360;
 
-  function quad(mx, my, w, h, uv, rot, r, g, b, a, dy = 0, dx = 0) {
+  function quad(mx, my, w, h, uv, rot, r, g, b, a, dy = 0, dx = 0, gray = 0) {
     if ((nverts + 6) * STRIDE > vbuf.length) { const nb = new Float32Array(vbuf.length * 2); nb.set(vbuf); vbuf = nb; }
     const x0 = -w / 2 + dx, x1 = w / 2 + dx, y0 = -h / 2 + dy, y1 = h / 2 + dy;
     const P = [[x0, y0, uv[0], uv[1]], [x1, y0, uv[2], uv[1]], [x1, y1, uv[2], uv[3]], [x0, y0, uv[0], uv[1]], [x1, y1, uv[2], uv[3]], [x0, y1, uv[0], uv[3]]];
     for (const [ox, oy, u, v] of P) {
       const o = nverts++ * STRIDE;
       vbuf[o] = mx; vbuf[o + 1] = my; vbuf[o + 2] = ox; vbuf[o + 3] = oy; vbuf[o + 4] = u; vbuf[o + 5] = v;
-      vbuf[o + 6] = rot; vbuf[o + 7] = r * a; vbuf[o + 8] = g * a; vbuf[o + 9] = b * a; vbuf[o + 10] = a;
+      vbuf[o + 6] = rot; vbuf[o + 7] = r * a; vbuf[o + 8] = g * a; vbuf[o + 9] = b * a; vbuf[o + 10] = a; vbuf[o + 11] = gray;
     }
   }
 
@@ -278,7 +284,7 @@
       gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr);
       this.pr = pr; this.buf = gl.createBuffer();
       this.loc = {};
-      for (const a of ['a_pos', 'a_off', 'a_uv', 'a_rot', 'a_col']) this.loc[a] = gl.getAttribLocation(pr, a);
+      for (const a of ['a_pos', 'a_off', 'a_uv', 'a_rot', 'a_col', 'a_gray']) this.loc[a] = gl.getAttribLocation(pr, a);
       for (const u of ['u_matrix', 'u_view', 'u_bearing', 'u_tex']) this.loc[u] = gl.getUniformLocation(pr, u);
       const at = BUSISO.atlas(MOBILE ? 1.0 : 1.25, MOBILE ? 2048 : 4096); UV = at.uv;
       this.tex = gl.createTexture();
@@ -300,7 +306,7 @@
       if (this.dirty) { gl.bufferData(gl.ARRAY_BUFFER, vbuf.subarray(0, nverts * STRIDE), gl.DYNAMIC_DRAW); this.dirty = false; }
       const F = 4;
       const attr = (n, size, off) => { gl.enableVertexAttribArray(l[n]); gl.vertexAttribPointer(l[n], size, gl.FLOAT, false, STRIDE * F, off * F); };
-      attr('a_pos', 2, 0); attr('a_off', 2, 2); attr('a_uv', 2, 4); attr('a_rot', 1, 6); attr('a_col', 4, 7);
+      attr('a_pos', 2, 0); attr('a_off', 2, 2); attr('a_uv', 2, 4); attr('a_rot', 1, 6); attr('a_col', 4, 7); attr('a_gray', 1, 11);
       // positions are relative to `ref` for float precision; fold the offset into the matrix
       const M = Array.from(matrix), rx = ref[0], ry = ref[1];
       M[12] = matrix[0] * rx + matrix[4] * ry + matrix[12]; M[13] = matrix[1] * rx + matrix[5] * ry + matrix[13];
@@ -354,14 +360,16 @@
       const mx = mercX(lng) - ref[0], my = mercY(lat) - ref[1];
       const fl = v[6], lv = lvOf(fl), col = COLS[lv] || (COLS[lv] = hex(BUSART.L[lv].key));
       const isMoving = t - (tr.moving || 0) < 3, sel = reg === selReg;
-      if (isMoving || sel) {
+      // a bus or a route is picked: everything else goes black and white
+      const gray = selReg ? (sel ? 0 : 1) : focusSn ? (snOf(v[1]) === focusSn ? 0 : 1) : 0;
+      if ((isMoving || sel) && !gray) {
         const ph = (reg.charCodeAt(1) * 7 + reg.charCodeAt(reg.length - 1) * 13) % 628 / 100;
         const a = sel ? 0.55 : (0.30 + 0.14 * Math.sin(pulseT + ph)) * (z < 12 ? 0.6 : 1);
         glows.push([mx, my, glowR * (sel ? 1.5 : 1), col, a]);
       }
       const dir = Math.round((((h - bearing) % 360 + 360) % 360) / 22.5) % 16;
       const cr = crowdOf(v[1], hourNow), lvl = cr ? cr.level : 1;
-      buses.push([mx, my, `${lv}:${dir}:${lvl}`]);
+      buses.push([mx, my, `${lv}:${dir}:${lvl}`, gray]);
       // parked at a terminus (or waiting for its next trip): it sleeps
       if (z >= 13 && t - (tr.moving || 0) > 90) {
         const st = stopsOf(v[1]);
@@ -370,16 +378,17 @@
           const cx = K * Math.cos(lat * Math.PI / 180), far = s_ => Math.hypot((s_[3] - lng) * cx, (s_[2] - lat) * K);
           sleep = Math.min(far(st[0]), far(st[st.length - 1])) < 250;
         }
-        if (sleep) zzs.push([mx, my, (reg.charCodeAt(reg.length - 1) % 10) / 10]);
+        if (sleep && !gray) zzs.push([mx, my, (reg.charCodeAt(reg.length - 1) % 10) / 10]);
       }
-      if (snowZ && fl.includes('a')) snows.push([mx, my, -(AY * s + snowPx * 0.55)]);
-      VIS.push([reg, lng, lat, Math.max(14, 12 * 9 * s * 0.45)]);
+      if (snowZ && fl.includes('a')) snows.push([mx, my, -(AY * s + snowPx * 0.55), gray]);
+      VIS.push([reg, lng, lat, Math.max(14, 12 * 9 * s * 0.45), gray]);
     }
     nverts = 0;
     for (const [mx, my, r, c, a] of glows) quad(mx, my, r, r, UV.glow, -1000, c[0], c[1], c[2], a);
-    buses.sort((p, q) => p[1] - q[1]);              // back to front: farther (higher on screen) first
-    for (const [mx, my, key] of buses) quad(mx, my, bw, bh, UV[key], -1000, 1, 1, 1, 1, lift);
-    for (const [mx, my, dy] of snows) quad(mx, my, snowPx, snowPx, UV.snow, -1000, 1, 1, 1, 1, dy);
+    // back to front: farther (higher on screen) first; the picked buses over the greyed ones
+    buses.sort((p, q) => (q[3] - p[3]) || (p[1] - q[1]));
+    for (const [mx, my, key, g] of buses) quad(mx, my, bw, bh, UV[key], -1000, 1, 1, 1, 1, lift, 0, g);
+    for (const [mx, my, dy, g] of snows) quad(mx, my, snowPx, snowPx, UV.snow, -1000, 1, 1, 1, 1, dy, 0, g);
     // three z's drifting up and fading, out of phase with each other and other buses
     if (UV.zzz) for (const [mx, my, ph0] of zzs) for (let k = 0; k < 3; k++) {
       const ph = ((CALM ? 0.5 : t * 0.45) + k / 3 + ph0) % 1, sz = (10 + 10 * ph) * Math.max(1, s * 1.8);
@@ -387,21 +396,41 @@
     }
     glLayer.dirty = true;
     map.triggerRepaint();
+    labels();
   }
 
-  // route numbers: a light symbol layer, refreshed twice a second, street zooms only
-  let lastLabel = 0;
-  function labels(force) {
-    const src = map.getSource('live-lbl'); if (!src) return;
-    const z = map.getZoom(), t = performance.now();
-    if (!force && t - lastLabel < 500) return;
-    lastLabel = t;
-    const feats = z < 14 || !on ? [] : VIS.slice(0, 400).map(([reg, lng, lat]) => {
-      const tr = TRACK.get(reg);
-      return { type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: { sn: snOf(tr.v[1]), c: lvCol(tr.v[6]) } };
-    });
-    src.setData({ type: 'FeatureCollection', features: feats });
+  /* Route numbers under the buses, street zooms only. Plain HTML labels moved with
+     the bus on every frame: a symbol layer refreshed from moving points re-places
+     and fades each label in again at street zoom, so the numbers flickered. */
+  const LBL = new Map();
+  let lblBox = null;
+  function labels() {
+    if (!lblBox) {
+      lblBox = document.createElement('div'); lblBox.className = 'lv-lbls';
+      map.getCanvasContainer().appendChild(lblBox);
+    }
+    const show = on && running && map.getZoom() >= 14;
+    const seen = new Set();
+    if (show) for (const [reg, lng, lat, , gray] of VIS.slice(0, 400)) {
+      const tr = TRACK.get(reg); if (!tr) continue;
+      let el = LBL.get(reg);
+      if (!el) { el = document.createElement('span'); LBL.set(reg, el); lblBox.appendChild(el); }
+      const sn = snOf(tr.v[1]), c = gray ? '#8a8a8a' : lvCol(tr.v[6]);
+      if (el._sn !== sn) { el.textContent = sn; el._sn = sn; }
+      if (el._c !== c) { el.style.color = c; el._c = c; el.classList.toggle('dim', !!gray); }
+      el._ll = [lng, lat];
+      seen.add(reg);
+    }
+    for (const [reg, el] of LBL) if (!seen.has(reg)) { el.remove(); LBL.delete(reg); }
+    placeLabels();
   }
+  function placeLabels() {
+    for (const el of LBL.values()) {
+      const q = map.project(el._ll);
+      el.style.transform = `translate(${Math.round(q.x)}px, ${Math.round(q.y)}px) translate(-50%, 14px)`;
+    }
+  }
+  map.on('move', () => { if (LBL.size) placeLabels(); });
 
   /* Pace: how often bus positions are recomputed. The map itself redraws on
      every pan or zoom regardless; this is only the animation clock. */
@@ -419,18 +448,13 @@
     if (document.hidden || !FEED) return;
     if (ts - lastU < interval()) return;
     lastU = ts;
-    update(); labels();
+    update();
   }
-  map.on('moveend', () => { if (running) { update(); labels(true); } });
+  map.on('moveend', () => { if (running) update(); });
 
   function addLayers() {
     if (map.getLayer('live-gl')) return;
     map.addLayer(glLayer);
-    map.addSource('live-lbl', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addLayer({ id: 'live-num', type: 'symbol', source: 'live-lbl', minzoom: 14,
-      layout: { 'text-field': ['get', 'sn'], 'text-font': ['Noto Sans Bold'], 'text-size': 11,
-        'text-offset': [0, 1.6], 'text-anchor': 'top', 'text-optional': true, 'text-padding': 1 },
-      paint: { 'text-color': ['get', 'c'], 'text-halo-color': '#fff', 'text-halo-width': 1.6 } });
   }
   // clicks: the nearest drawn bus within reach of the tap
   function busAt(p) {
@@ -450,7 +474,9 @@
     if (busAt(e.point)) map.getCanvas().style.cursor = 'pointer';
     else if (map.getCanvas().style.cursor === 'pointer' && !map.queryRenderedFeatures(e.point).length) map.getCanvas().style.cursor = '';
   });
-  const snOf = code => { const f = codeFeat(code); return f ? (f.properties.sn || f.properties.route_name) : code; };
+  // "c:<name>": a bus the collector could not place on one of our workings (a service
+  // Chennai One does not carry, e.g. Chennai Ula) — shown under the operator's route name
+  const snOf = code => { const f = codeFeat(code); return f ? (f.properties.sn || f.properties.route_name) : String(code).replace(/^c:/, ''); };
 
   /* ── polling ── */
   function poll() {
@@ -458,7 +484,7 @@
     fetch(`${URL_}?t=${Math.floor(Date.now() / 10000)}`).then(r => r.ok ? r.json() : null).then(j => {
       if (!j || !Array.isArray(j.v)) throw 0;
       FEED = parse(j);
-      ingest(FEED); update(); labels(true); pill();
+      ingest(FEED); update(); pill();
       if (cardStop) paintStopArrivals();
       if (cardBus) paintBus(cardBus, false);
     }).catch(() => { pill(true); });
@@ -471,7 +497,6 @@
   function start() {
     ensureTimings();
     addLayers();
-    map.setLayoutProperty('live-num', 'visibility', 'visible');
     ensureStops().then(() => { for (const tr of TRACK.values()) tr.ready = false; GEO.clear(); });
     poll();
     clearInterval(pollT);
@@ -481,8 +506,7 @@
   }
   function stop() {
     clearInterval(pollT); pollT = null; running = false;
-    nverts = 0; VIS = []; map.triggerRepaint();
-    if (map.getLayer('live-num')) { map.setLayoutProperty('live-num', 'visibility', 'none'); }
+    nverts = 0; VIS = []; map.triggerRepaint(); labels();
     pill();
     if (cardStop) paintStopArrivals();
   }
@@ -584,6 +608,10 @@
     .lv-sheethead { display: grid; grid-template-columns: 32px 1fr 32px; align-items: center; text-align: center; font-size: 16px; }
     .lv-x { border: 0; background: #f3eee4; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; display: grid; place-items: center; font-size: 14px; color: #444; }
     .lv-sub { text-align: center; font-size: 12.5px; color: var(--muted); margin: 6px 0 10px; }
+    .lv-lbls { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .lv-lbls span { position: absolute; left: 0; top: 0; font: 700 11px/1 "Noto Sans", system-ui, sans-serif; white-space: nowrap; will-change: transform;
+      text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 3px #fff; }
+    .lv-lbls span.dim { opacity: .75; }
     .lv-glabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 12px 2px 6px; }
     .lv-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
     .lv-tiles.two { grid-template-columns: 1fr 1fr; margin-top: 12px; }
@@ -625,7 +653,7 @@
       if (i >= 0) FILT.off.splice(i, 1); else FILT.off.push(g);
       if (FILT.off.length === GROUPS.length) FILT.off = FILT.off.filter(x => x !== g);   // never hide everything
     } else FILT.wc = !FILT.wc;
-    saveFilt(); pill(); update(); labels(true);
+    saveFilt(); pill(); update();
     if (cardStop) paintStopArrivals();
   });
   setInterval(() => on && FEED && pill(), 15000);
@@ -847,7 +875,7 @@
   const baseOpenStop = openStop;
   openStop = function (f, opts = {}) {
     baseOpenStop(f);
-    cardBus = null; selReg = null;
+    cardBus = null; selReg = null; focusSn = null;
     cardStop = f.geometry.coordinates;
     if (opts.fly) map.flyTo({ center: cardStop, zoom: Math.max(map.getZoom(), 16), duration: 1100, essential: true });
     const head = document.createElement('div');
@@ -982,15 +1010,37 @@
         `<div class="lv-said">${ic(SAY[k].opts[v][0], 14)}<b>${NAMES[k + ':' + v]}</b>${d ? ` · ${NAMES[`${k}:${v}:${d}`]}` : ''}${sn && !q.reg ? ` · ${sn}` : ''}<span>${m < 1 ? 'just now' : m + ' min ago'}</span></div>`).join('');
     }).catch(() => {});
   }
-  $('card-close').addEventListener('click', () => { cardStop = cardBus = selReg = null; update(); setShare('', '', ''); });
+  $('card-close').addEventListener('click', () => { cardStop = cardBus = selReg = focusSn = null; update(); setShare('', '', ''); });
+  const baseClear = clearSelection;
+  clearSelection = function (...a) { focusSn = null; update(); return baseClear.apply(this, a); };
   const baseSelect = selectRoute;
   selectRoute = function (...a) {
     cardStop = cardBus = selReg = null;
+    focusSn = a[0] || null;
     const out = baseSelect.apply(this, a);
     const sn = a[0], e = ROUTE_IDX[sn], w = a[1] || (e && e.code) || '';
     if (sn) setShare(`route=${encodeURIComponent(sn)}${w ? `&w=${w}` : ''}`, `/r/${encodeURIComponent(sn)}${w ? `?w=${w}` : ''}`, `Route ${sn}${e && e.source ? ` · ${e.source} → ${e.dest}` : ''} — Chennai MTC map`);
     return out;
   };
+
+  /* ── search: live buses by fleet number, above the routes and stops ── */
+  $('q').addEventListener('input', () => {
+    const v = $('q').value.trim().toUpperCase().replace(/\s+/g, '');
+    if (!on || v.length < 2 || !TRACK.size) return;
+    const hits = [...TRACK.keys()].filter(r => r.toUpperCase().includes(v)).sort().slice(0, 12);
+    if (!hits.length) return;
+    const box = $('results'), none = box.querySelector('.hint');
+    if (none) none.remove();
+    box.insertAdjacentHTML('afterbegin', '<div class="grp">Live buses</div>' + hits.map(r => {
+      const tr = TRACK.get(r), f = codeFeat(tr.v[1]);
+      return `<div class="it" data-bus="${r}">${tagHTML(snOf(tr.v[1]), f && f.properties.category)}<span>Bus <b>${r}</b><div class="sub">${chips(tr.v[6])}${f ? '→ ' + (f.properties.destinatio || '') : ''}</div></span></div>`;
+    }).join(''));
+    box.querySelectorAll('[data-bus]').forEach(el => el.addEventListener('click', () => {
+      const tr = TRACK.get(el.dataset.bus); if (!tr) return;
+      openBus(el.dataset.bus);
+      const p = posOf(tr, now(), [0, 0, 0]); map.flyTo({ center: [p[0], p[1]], zoom: Math.max(map.getZoom(), 15), duration: 900 });
+    }));
+  });
 
   /* ── deep links: ?route= / ?stop= / ?bus= open what was shared ── */
   (() => {

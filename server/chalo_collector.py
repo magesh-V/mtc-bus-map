@@ -21,7 +21,7 @@ Chalo's route ids are its own, so each bus is matched to one of our workings
 (same route number) by where it is along that working's stops and which way it
 is heading. Chalo gives no stop-by-stop predictions, so ETAs are estimated
 from the bus's distance along the route at city bus speed. AC and Express come
-from Chalo's route features; electric from the flags we archived per
+from Chalo's route features, Premium from its P-prefixed route names (P570S); electric from the flags we archived per
 registration from Chennai One. Output and archive are the same as
 live_collector.py's, so the map, Traffic layer and dashboard carry on.
 """
@@ -33,6 +33,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import time
 import urllib.error
@@ -103,13 +104,22 @@ class ChaloCollector(Collector):
         on = set(Collector.running_now(self))
         live = {sn for sn, codes in self.by_sn.items() if on.intersection(codes)}
         return [vid for vid, v in self.variants.items()
-                if norm(v['route_name']) in live or norm(v['route_name']) not in self.by_sn]
+                if self.key(v['route_name']) in live or self.key(v['route_name']) is None]
+
+    def key(self, name):
+        """Our route number for a Chalo route name: as is, with the Premium "P" prefix
+        (Chalo files P570S buses under 570S too), or its first word ("S100 CMRL Feeder
+        Service"). None for services Chennai One does not carry (Chennai Ula, lifts)."""
+        for k in (norm(name), 'P' + norm(name), norm((name or '').split(' ')[0])):
+            if k in self.by_sn:
+                return k
+        return None
 
     def match(self, sn, lat, lon, bearing, halted):
         """Our working (code), next stop index k and metres along it, or None."""
         best = None
         cx = math.cos(math.radians(lat)) * 111320
-        for code in self.by_sn.get(norm(sn), []):
+        for code in self.by_sn.get(self.key(sn), []):
             ll, ds = self.stopll.get(code), self.sdist.get(code)
             if not ll or not ds or len(ll) < 2:
                 continue
@@ -149,25 +159,29 @@ class ChaloCollector(Collector):
                 lat, lon, vno = b['_latitude'], b['_longitude'], b['vNo']
             except (ValueError, KeyError, TypeError):
                 continue
-            # Chalo suffixes the fleet number: "E" electric, then "LF" low floor (K5008ELF = K5008)
-            lf = vno.endswith('LF')
-            reg = vno[:-2] if lf else vno
-            ev = reg.endswith('E')
-            reg = reg[:-1] if ev else reg
+            # Chalo suffixes the fleet number: "E" electric, "LF" low floor, "AC"
+            # (K5008ELF, K5421ELFAC = K5008, K5421)
+            reg, suf = vno, set()
+            for sx in ('AC', 'LF', 'E'):
+                if reg.endswith(sx) and len(reg) > len(sx) + 3:
+                    reg, suf = reg[:-len(sx)], suf | {sx}
+            lf, ev, acb = 'LF' in suf, 'E' in suf, 'AC' in suf
             fix = int((b.get('tS') or time.time() * 1000) / 1000)
             m = self.match(v['route_name'], lat, lon, b.get('bearing'), b.get('_isHalted'))
             known = self.fleet.get(reg, '')
-            flags = ''.join(sorted(set(flags_route + ('l' if lf or 'l' in known else '') +
-                                       ('e' if ev or 'e' in known else '') + ('a' if 'a' in known else ''))))
             if m:
                 code, k, d = m
                 ds = self.sdist[code]
                 eta = [[i, fix + (ds[i] - d) / SPEED + DWELL * (i - k)] for i in range(k, min(len(ds), k + 25))]
             else:
-                cands = self.by_sn.get(norm(v['route_name'])) or ['']
+                # off our workings, or a service Chennai One does not carry: still a bus on the
+                # road, shown under Chalo's route name ("c:" codes have no stops or ETAs)
+                cands = self.by_sn.get(self.key(v['route_name'])) or ['c:' + v['route_name'].strip()]
                 code, eta = cands[0], []
-            if not code:
-                continue
+            flags = ''.join(sorted(set(flags_route + ('l' if lf or 'l' in known else '') +
+                                       ('e' if ev or 'e' in known else '') +
+                                       ('a' if acb or 'a' in known else '') +
+                                       ('p' if re.match(r'P\d', v['route_name']) else ''))))
             rows.append([reg, code, round(lat, 5), round(lon, 5), b.get('bearing') or 0, fix, flags, eta])
         if self.a.archive:
             self.record(rows)

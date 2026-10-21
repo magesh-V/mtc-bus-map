@@ -731,7 +731,7 @@ function openTerminus(f) {
 }
 
 /* ── search ── */
-function renderHint() { $('results').innerHTML = '<div class="hint">Type a route number (e.g. <b>5B</b>, <b>21G</b>, <b>M1</b>) or a stop name (e.g. <b>Adyar</b>). Or explore the map — tap a stop for its buses, tap a line to trace a route.</div>'; }
+function renderHint() { $('results').innerHTML = '<div class="hint">Type a route number (e.g. <b>5B</b>, <b>21G</b>, <b>M1</b>) , a stop name (e.g. <b>Adyar</b>) or a bus number (e.g. <b>K5657</b>). Or explore the map — tap a stop for its buses, tap a line to trace a route.</div>'; }
 renderHint();
 $('q').addEventListener('input', () => {
   const v = $('q').value.trim().toLowerCase();
