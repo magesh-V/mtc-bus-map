@@ -255,7 +255,8 @@ function tagHTML(name, cat) {
   // "21G (2)" -> base + a lighter suffix, so the variant reads as secondary
   const m = /^(.*?)\s*\((\d+)\)$/.exec(String(name || ''));
   const label = m ? `${m[1]}<span class="vsuffix">(${m[2]})</span>` : name;
-  return `<span class="service-tag ${catClass(cat)}" title="${String(name || '').replace(/"/g, '&quot;')}">${label}</span>`;
+  // P570S etc. are MTC Premium: gold, like the buses
+  return `<span class="service-tag ${/^P\d/.test(String(name || '')) ? 'premium' : catClass(cat)}" title="${String(name || '').replace(/"/g, '&quot;')}">${label}</span>`;
 }
 
 function clearSelection() {
@@ -731,12 +732,19 @@ function openTerminus(f) {
 }
 
 /* ── search ── */
+const rkey = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 function renderHint() { $('results').innerHTML = '<div class="hint">Type a route number (e.g. <b>5B</b>, <b>21G</b>, <b>M1</b>) , a stop name (e.g. <b>Adyar</b>) or a bus number (e.g. <b>K5657</b>). Or explore the map — tap a stop for its buses, tap a line to trace a route.</div>'; }
 renderHint();
 $('q').addEventListener('input', () => {
   const v = $('q').value.trim().toLowerCase();
   if (!v) { renderHint(); return; }
-  const rts = Object.values(ROUTE_IDX).filter(e => e.name.toLowerCase().startsWith(v)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })).slice(0, 22);
+  // route numbers however typed: "570s", "570 S", "p570s" all find P570S. Spaces, case and
+  // punctuation are ignored, and a letter prefix (P remium, M ini, A, S …) may be left off.
+  const q = rkey(v);
+  const rank = e => { const k = rkey(e.name), bare = k.replace(/^[A-Z]+(?=\d)/, '');
+    return !q ? -1 : k.startsWith(q) ? 0 : bare.startsWith(q) ? 1 : k.includes(q) ? 2 : -1; };
+  const rts = Object.values(ROUTE_IDX).map(e => [rank(e), e]).filter(([r]) => r >= 0)
+    .sort((a, b) => a[0] - b[0] || a[1].name.localeCompare(b[1].name, undefined, { numeric: true })).map(([, e]) => e).slice(0, 22);
   const sts = ((STOPS && STOPS.features) || []).filter(f =>
     ((f.properties['Stop Name'] || '') + ' ' + (f.properties.alt || '')).toLowerCase().includes(v)).slice(0, 20);
   let h = '';

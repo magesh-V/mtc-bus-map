@@ -7,6 +7,13 @@
     GET  /api/recent?reg=K0038       reports on that bus, last 90 minutes
     GET  /api/recent?stop=<code>     reports made at that stop, last 90 minutes
     GET  /api/summary                counts by kind and value, last 7 days (dashboard)
+    POST /api/watch           {"sn": "P570S"}   a rider has this route's buses open on the map
+
+Watching: while a rider has a bus or a route open, the page says so once a
+minute. The routes watched in the last WATCH_TTL seconds (at most WATCH_MAX, the
+most recently asked for) are written to <dir>/watch.json, and the live collector
+looks at those routes every 30 s instead of once a cycle. However many riders
+watch, the extra load on the source is capped by WATCH_MAX, not by visitors.
 
 Answers come from a fixed set of taps (KINDS), so nothing free-text is stored.
 lat/lon are the bus's or the stop's position, never the rider's. The client IP
@@ -35,6 +42,9 @@ KINDS = {
     'access': {'ramp_ok': [''], 'ramp_broken': [''], 'not_low_floor': ['']},
 }
 LIMIT, WINDOW = 30, 3600                    # reports per client per hour
+WATCH_TTL, WATCH_MAX, WATCH_LIMIT = 150, 8, 120   # s; routes; pings per client per hour
+watching = {}                               # sn -> last asked (epoch)
+whits = collections.defaultdict(collections.deque)
 SALT = {'day': None, 'v': ''}
 hits = collections.defaultdict(collections.deque)
 lock = threading.Lock()
@@ -70,7 +80,35 @@ class H(BaseHTTPRequestHandler):
         # behind Cloudflare and Caddy: the rider's address is in cf-connecting-ip
         return (self.headers.get('cf-connecting-ip') or self.headers.get('x-forwarded-for') or self.client_address[0]).split(',')[0].strip()
 
+    def watch(self):
+        n = int(self.headers.get('content-length') or 0)
+        try:
+            sn = clean(json.loads(self.rfile.read(n)).get('sn'), 24).strip() if 0 < n <= 200 else ''
+        except (ValueError, AttributeError):
+            sn = ''
+        if not sn:
+            return self.send(400, {'error': 'sn'})
+        ip, now = self.client(), time.time()
+        with lock:
+            q = whits[ip]
+            while q and now - q[0] > WINDOW:
+                q.popleft()
+            if len(q) >= WATCH_LIMIT:
+                return self.send(429, {'error': 'slow down'})
+            q.append(now)
+            watching[sn] = now
+            for k in [k for k, t in watching.items() if now - t > WATCH_TTL]:
+                del watching[k]
+            hot = sorted(watching, key=watching.get, reverse=True)[:WATCH_MAX]
+            tmp = os.path.join(self.server.dir, 'watch.json.tmp')
+            with open(tmp, 'w') as fh:
+                json.dump({'t': int(now), 'ttl': WATCH_TTL, 'sn': {k: int(watching[k]) for k in hot}}, fh)
+            os.replace(tmp, os.path.join(self.server.dir, 'watch.json'))
+        return self.send(200, {'ok': True, 'fast': sn in hot})
+
     def do_POST(self):
+        if urlparse(self.path).path == '/api/watch':
+            return self.watch()
         if urlparse(self.path).path != '/api/report':
             return self.send(404, {'error': 'not found'})
         n = int(self.headers.get('content-length') or 0)

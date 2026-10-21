@@ -272,7 +272,7 @@ fetch('data.json?t=' + Math.floor(Date.now() / 600000)).then(r => r.json()).then
     $('roster-kpis').innerHTML = [[fmt(R.trips), 'trips with a bus assigned'], [fmt(R.buses), 'buses rostered'], [Math.round(100 * R.electric_trips / R.trips) + '%', 'of trips on electric buses'], [Math.round(100 * R.low_floor_trips / R.trips) + '%', 'on low-floor buses']]
       .map(([b, s]) => `<div class="kpi"><b>${b}</b><span>${s}</span></div>`).join('');
     const tn = { ORDINARY: 'Ordinary', EXECUTIVE: 'Deluxe', AC: 'AC', EXPRESS: 'Express', PREMIUM: 'Premium', SPECIAL: 'Small Exp.', NON_AC: 'Small' };
-    plainBars($('c-tier'), R.by_tier.map(t => tn[t[0]] || t[0]), R.by_tier.map(t => t[1]), { h: 130, W: 420, color: R.by_tier.map(t => ({ AC: css('--blue'), EXECUTIVE: css('--purple'), PREMIUM: '#b3803f' })[t[0]] || css('--ink')), fmtv: v => fmt(v) + ' trips' });
+    plainBars($('c-tier'), R.by_tier.map(t => tn[t[0]] || t[0]), R.by_tier.map(t => t[1]), { h: 130, W: 420, color: R.by_tier.map(t => ({ AC: css('--blue'), EXECUTIVE: css('--purple'), PREMIUM: '#b8892f' })[t[0]] || css('--ink')), fmtv: v => fmt(v) + ' trips' });
     plainBars($('c-tpb'), R.trips_per_bus.map(t => t[0] >= 20 ? '20+' : String(t[0])), R.trips_per_bus.map(t => t[1]), { fmtv: v => fmt(v) + ' buses', labelEvery: 2, W: 420, h: 230 });
   }
 

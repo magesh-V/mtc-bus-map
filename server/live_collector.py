@@ -17,7 +17,8 @@ Output (rewritten atomically every --write seconds):
   {"t": now, "polled": n routes in the last cycle, "cycle": seconds per cycle,
    "v": [[reg, routeCode, lat, lon, bearing, fixEpoch, flags, [[stopIdx, etaEpoch], ...]], ...]}
   stopIdx indexes route_stops.json[routeCode].d[0].s; flags: a=AC e=electric l=low floor
-  x=express p=premium u=waiting for its next trip (fmt 2: eta is [i, dt, ...], dt after the fix)
+  x=express p=premium u=waiting for its next trip (fmt 2: eta is [i, dt, ...], dt after the fix);
+  an optional 9th field is the route number to show when it is not the working's own
 
 With --archive DIR it also keeps, per IST day:
   obs-YYYY-MM-DD.jsonl    every new GPS fix: {t, reg, r, la, lo, k (next stop idx), f}
@@ -167,7 +168,7 @@ class Collector:
         day = dt.datetime.now(IST).strftime('%Y-%m-%d')
         obs, spd = [], []
         with self.alock:
-            for reg, code, lat, lon, _b, fix, flags, eta in rows:
+            for reg, code, lat, lon, _b, fix, flags, eta, *_ in rows:
                 prev = self.last.get(reg)
                 if prev and prev[1] >= fix:
                     continue                                   # same fix seen via another route
@@ -209,7 +210,7 @@ class Collector:
             flat = []
             for i, t in [e for e in r[7] if e[1] >= now - 120][:ETA_KEEP]:
                 flat += [i, int(t - r[5])]
-            out.append(r[:7] + [flat])
+            out.append(r[:7] + [flat] + r[8:9])           # [8]: route number shown, when not the working's own
         return {'t': int(now), 'fmt': 2, 'polled': self.cycle_n, 'cycle': round(self.cycle_s), 'v': out}
 
     def writer(self):

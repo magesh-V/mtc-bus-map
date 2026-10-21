@@ -13,6 +13,8 @@ dashboard read our copy, so visitors never call Chalo themselves.
          ("E" = electric, then "LF" = low floor), previous / next stop, fix time
 
 Politeness: one variant at a time at --rate requests a second (default 1.5);
+routes a rider has open on the map (--watch) are polled every 30 s, at most 16
+variants at once;
 variants empty three polls running are looked at every fourth cycle; nothing
 between 00:30 and 04:30 IST; any 429 / 5xx pauses the whole collector for 10
 minutes. The User-Agent says who we are.
@@ -35,6 +37,7 @@ import os
 import random
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -46,6 +49,8 @@ BASE = 'https://production.zophop.com'
 UA = 'MTCMap/1.0 (+https://mtc.reclaimchennai.city; civic transit map)'
 SPEED = 4.4          # m/s (~16 km/h, the observed city median) for estimated ETAs
 DWELL = 12           # s per stop
+HOT_EVERY = 30       # s between polls of a route a rider has open on the map
+HOT_MAX = 16         # route variants watched at once: at most HOT_MAX / HOT_EVERY extra requests a second
 
 
 def get(path, timeout=30):
@@ -181,13 +186,40 @@ class ChaloCollector(Collector):
             flags = ''.join(sorted(set(flags_route + ('l' if lf or 'l' in known else '') +
                                        ('e' if ev or 'e' in known else '') +
                                        ('a' if acb or 'a' in known else '') +
-                                       ('p' if re.match(r'P\d', v['route_name']) else ''))))
-            rows.append([reg, code, round(lat, 5), round(lon, 5), b.get('bearing') or 0, fix, flags, eta])
+                                       # MTC Premium is the OHM-run Switch EiV12 fleet: electric AC
+                                       ('pe' if re.match(r'P\d', v['route_name']) else ''))))
+            row = [reg, code, round(lat, 5), round(lon, 5), b.get('bearing') or 0, fix, flags, eta]
+            if not code.startswith('c:') and self.key(v['route_name']) == 'P' + norm(v['route_name']):
+                row.append(v['route_name'].strip())   # matched by alias (570S on P570S's stops): show its own number
+            rows.append(row)
         if self.a.archive:
             self.record(rows)
         with self.lock:
             self.state[vid] = (time.time(), rows)
             self.empty[vid] = 0 if rows else self.empty.get(vid, 0) + 1
+
+
+def hot_loop(c, path):
+    """Routes riders have open on the map (watch.json, written by report_api.py)
+    are polled every HOT_EVERY s instead of once a cycle."""
+    last = {}
+    while True:
+        time.sleep(5)
+        try:
+            w = json.load(open(path))
+        except (OSError, ValueError):
+            continue
+        now = time.time()
+        sns = {norm(k) for k, t in (w.get('sn') or {}).items() if now - t < (w.get('ttl') or 150)}
+        if not sns or not c.running_now():          # night, or paused after a 429
+            continue
+        vids = [vid for vid, v in c.variants.items()
+                if (c.key(v['route_name']) or norm(v['route_name'])) in sns and c.empty.get(vid, 0) < 3][:HOT_MAX]
+        for vid in vids:
+            if now - last.get(vid, 0) >= HOT_EVERY:
+                last[vid] = time.time()
+                c.poll(vid)
+                time.sleep(1.0 / c.a.rate)
 
 
 def main():
@@ -200,12 +232,16 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--rate', type=float, default=1.5)
     ap.add_argument('--workers', type=int, default=2)
-    ap.add_argument('--write', type=float, default=20)
+    ap.add_argument('--write', type=float, default=10)
+    ap.add_argument('--watch', default='', help='watch.json from report_api.py: routes riders have open')
     a = ap.parse_args()
     if a.archive:
         os.makedirs(a.archive, exist_ok=True)
     random.seed()
-    ChaloCollector(a).run()
+    c = ChaloCollector(a)
+    if a.watch:
+        threading.Thread(target=hot_loop, args=(c, a.watch), daemon=True).start()
+    c.run()
 
 
 if __name__ == '__main__':

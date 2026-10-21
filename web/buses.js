@@ -8,7 +8,7 @@
      electric non-AC  Switch EiV12, cyan and purple with a black glass band
      diesel           Ashok Leyland standard-floor, sky blue with a yellow stripe
      diesel AC        the same body in deep blue, AC pod on the roof
-     premium          Switch EiV12 in bronze and black (pre-book only; the feed
+     premium          Switch EiV12 in champagne gold and black, "PREMIUM" and a white star on the side (pre-book only; the feed
                       has not shown one yet, but the app knows the tier)
 
    Three drawings per livery: a top-down bus that turns with the road (city
@@ -22,7 +22,7 @@ const BUSART = (() => {
     ev:       { name: 'Electric',    roof: '#5a2ad0', body: '#45d2e6', skirt: '#5a2ad0', glass: '#15181c', stripe: '#f09a1e', bolt: '#ffffff', mask: '#16191d', key: '#5a2ad0', ev: 1, ac: 0, panel: 1 },
     diesel:   { name: 'Diesel',      roof: '#a9d8f4', body: '#86c6ef', skirt: '#86c6ef', glass: '#33404a', stripe: '#f2c230', bolt: null,      mask: '#86c6ef', key: '#3d9be0', ev: 0, ac: 0, panel: 0 },
     dieselAC: { name: 'AC',          roof: '#d6e4f5', body: '#2c62b8', skirt: '#244f96', glass: '#1d2733', stripe: '#9fd3f4', bolt: null,      mask: '#1d2733', key: '#2c62b8', ev: 0, ac: 1, panel: 1 },
-    premium:  { name: 'Premium',     roof: '#c79d5f', body: '#b3803f', skirt: '#9b6c33', glass: '#15181c', stripe: '#f0a020', bolt: '#ffffff', mask: '#16191d', key: '#b3803f', ev: 1, ac: 1, panel: 1 },
+    premium:  { name: 'Premium',     roof: '#d9b96e', body: '#c9a24f', skirt: '#b48b3a', glass: '#101215', stripe: '#f1d48a', bolt: null,      mask: '#101215', key: '#b8892f', ev: 1, ac: 1, panel: 1, star: '#ffffff', word: 'PREMIUM', rearMask: 1 },
   };
   const of = fl => fl.includes('p') ? 'premium' : fl.includes('e') ? (fl.includes('a') ? 'evAC' : 'ev') : fl.includes('a') ? 'dieselAC' : 'diesel';
 

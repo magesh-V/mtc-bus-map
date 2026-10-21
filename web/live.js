@@ -415,7 +415,7 @@
       const tr = TRACK.get(reg); if (!tr) continue;
       let el = LBL.get(reg);
       if (!el) { el = document.createElement('span'); LBL.set(reg, el); lblBox.appendChild(el); }
-      const sn = snOf(tr.v[1]), c = gray ? '#8a8a8a' : lvCol(tr.v[6]);
+      const sn = busSn(tr), c = gray ? '#8a8a8a' : lvCol(tr.v[6]);
       if (el._sn !== sn) { el.textContent = sn; el._sn = sn; }
       if (el._c !== c) { el.style.color = c; el._c = c; el.classList.toggle('dim', !!gray); }
       el._ll = [lng, lat];
@@ -476,7 +476,27 @@
   });
   // "c:<name>": a bus the collector could not place on one of our workings (a service
   // Chennai One does not carry, e.g. Chennai Ula) — shown under the operator's route name
+  // the number shown for a bus: the collector's own when it differs from the working's
+  // (a 570S bus placed on P570S's stops), else the working's
+  const busSn = tr => tr.v[8] || snOf(tr.v[1]);
   const snOf = code => { const f = codeFeat(code); return f ? (f.properties.sn || f.properties.route_name) : String(code).replace(/^c:/, ''); };
+
+  /* ── watching: the route of the open bus, or the picked route, is polled fast on the
+     server while anyone has it open. One ping a minute; the server caps how many routes. */
+  const watchSn = () => {
+    if (!on) return null;
+    if (selReg) { const tr = TRACK.get(selReg); return tr ? snOf(tr.v[1]) : null; }
+    return focusSn;
+  };
+  let watchedAt = 0, watchedSn = null;
+  function watchPing(force) {
+    const sn = watchSn();
+    if (!sn || document.hidden) return;
+    if (!force && sn === watchedSn && Date.now() - watchedAt < 60000) return;
+    watchedSn = sn; watchedAt = Date.now();
+    fetch('api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sn }) }).catch(() => {});
+  }
+  setInterval(watchPing, 15000);
 
   /* ── polling ── */
   function poll() {
@@ -500,7 +520,11 @@
     ensureStops().then(() => { for (const tr of TRACK.values()) tr.ready = false; GEO.clear(); });
     poll();
     clearInterval(pollT);
-    pollT = setInterval(poll, POLL_MS);
+    // every 10 s while a bus or route is open (the collector polls those every 30 s), else POLL_MS
+    let lastPoll = Date.now();
+    pollT = setInterval(() => {
+      if (watchSn() || Date.now() - lastPoll >= POLL_MS - 500) { lastPoll = Date.now(); poll(); }
+    }, 10000);
     if (!running) { running = true; requestAnimationFrame(loop); }
     pill();
   }
@@ -692,7 +716,7 @@
       // AC: a blue snowflake on ice, so it never reads as the solid-blue wheelchair badge
       + (fl.includes('a') ? badge('snow', '#e4f3ff', 'AC', ' ac') : '')
       + (fl.includes('l') ? badge('access', '#1f5fd6', 'Low floor with a ramp — wheelchair accessible') : '')
-      + (fl.includes('p') ? `<span class="lv-chip" style="background:#b3803f">Premium</span>` : '')
+      + (fl.includes('p') ? `<span class="lv-chip" style="background:linear-gradient(180deg,#e0c27a,#b8892f);color:#121212">Premium</span>` : '')
       + (fl.includes('x') ? `<span class="lv-chip" style="background:#b8860b">Express</span>` : '')
       + (fl.includes('u') ? `<span class="lv-chip" style="background:#8a8a8e">Waiting for next trip</span>` : '');
   };
@@ -735,8 +759,8 @@
     const cam = { center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
     if (ROUTE_IDX[sn]) { baseSelect(sn, code); map.stop(); map.jumpTo(cam); } else showCard();
     selReg = reg; cardBus = reg; cardStop = null;
-    paintBus(reg, true); showBusRoute(code); update();
-    setShare(`bus=${encodeURIComponent(reg)}`, `/b/${encodeURIComponent(reg)}`, `Bus ${reg} on route ${snOf(tr.v[1])} — live on the Chennai MTC map`);
+    paintBus(reg, true); showBusRoute(code); update(); watchPing();
+    setShare(`bus=${encodeURIComponent(reg)}`, `/b/${encodeURIComponent(reg)}`, `Bus ${reg} on route ${busSn(tr)} — live on the Chennai MTC map`);
   }
   // trace the bus's own working on the map, the way tapping a route does
   function showBusRoute(code) {
@@ -752,7 +776,7 @@
   function paintBus(reg, first) {
     const tr = TRACK.get(reg);
     if (!tr) { const bb = $('lv-busbar'); if (bb) bb.innerHTML = '<div class="lv-note">This bus is no longer reporting.</div>'; return; }
-    const [, code, , , , fix, fl] = tr.v, sn = snOf(code), st = stopsOf(code) || [];
+    const [, code, , , , fix, fl] = tr.v, sn = busSn(tr), st = stopsOf(code) || [];
     const f = codeFeat(code), dest = f ? f.properties.destinatio : (st.length ? st[st.length - 1][1] : '');
     $('card-title').innerHTML = `${tagHTML(sn, f && f.properties.category)}<span class="ttl"><span>→ ${dest || ''}</span></span>`;
     $('card-sub').innerHTML = `<span class="lv-busline">${chips(fl)}Bus <b>${reg}</b> &middot; GPS ${ago(now() - fix)} ago</span>`;
@@ -849,14 +873,14 @@
     const t = now(), arr = [];
     for (const [reg, tr] of TRACK) {
       const s = want.get(tr.v[1]); if (!s) continue;
-      for (const [i, et] of tr.v[7]) if (s.has(i) && et > t - 30 && et < t + 5400) { arr.push({ reg, code: tr.v[1], et, fl: tr.v[6] }); break; }
+      for (const [i, et] of tr.v[7]) if (s.has(i) && et > t - 30 && et < t + 5400) { arr.push({ reg, code: tr.v[1], et, fl: tr.v[6], sn: busSn(tr) }); break; }
     }
     arr.sort((a, b) => a.et - b.et);
     const hidden = arr.filter(a => !passes(a.fl)).length;
     arr.splice(0, arr.length, ...arr.filter(a => passes(a.fl)));
     const rows = arr.slice(0, 12).map(a => {
       const f = codeFeat(a.code), dest = f ? f.properties.destinatio : '';
-      return `<div class="lv-row" data-reg="${a.reg}" style="cursor:pointer">${tagHTML(snOf(a.code), f && f.properties.category)}`
+      return `<div class="lv-row" data-reg="${a.reg}" style="cursor:pointer">${tagHTML(a.sn || snOf(a.code), f && f.properties.category)}`
         + `<span class="meta">→ <b>${dest || ''}</b><br>${chips(a.fl)}${a.reg}${(c => c ? ` <span title="${CROWD_NAMES[c.level]} (estimated)" style="color:${CROWD_COL[c.level]}">${PEOPLE}</span>` : '')(crowdOf(a.code, new Date(a.et * 1000 + 19800000).getUTCHours()))}</span>`
         + `<span class="when">${inMin(a.et)}<small>${hhmm(a.et)}</small></span></div>`;
     }).join('');
@@ -987,11 +1011,11 @@
     };
     const pick = () => {
       const buses = pickBus();
-      frame('Which bus?', `<div class="lv-tiles">${buses.map(([et, reg, tr]) => `<button class="lv-tile" data-reg="${reg}">${tagHTML(snOf(tr.v[1]))}<span>${reg} · ${inMin(et)}</span></button>`).join('')}`
+      frame('Which bus?', `<div class="lv-tiles">${buses.map(([et, reg, tr]) => `<button class="lv-tile" data-reg="${reg}">${tagHTML(busSn(tr))}<span>${reg} · ${inMin(et)}</span></button>`).join('')}`
         + `<button class="lv-tile" data-reg="">${ic('noshow', 26)}<span>A bus that isn't listed</span></button></div>`);
       sheet.querySelectorAll('[data-reg]').forEach(b => b.onclick = () => {
         const tr = TRACK.get(b.dataset.reg);
-        if (tr) Object.assign(ctx, { reg: b.dataset.reg, route: tr.v[1], sn: snOf(tr.v[1]), fl: tr.v[6] });
+        if (tr) Object.assign(ctx, { reg: b.dataset.reg, route: tr.v[1], sn: busSn(tr), fl: tr.v[6] });
         step1();
       });
     };
@@ -1017,6 +1041,7 @@
   selectRoute = function (...a) {
     cardStop = cardBus = selReg = null;
     focusSn = a[0] || null;
+    setTimeout(watchPing, 0);
     const out = baseSelect.apply(this, a);
     const sn = a[0], e = ROUTE_IDX[sn], w = a[1] || (e && e.code) || '';
     if (sn) setShare(`route=${encodeURIComponent(sn)}${w ? `&w=${w}` : ''}`, `/r/${encodeURIComponent(sn)}${w ? `?w=${w}` : ''}`, `Route ${sn}${e && e.source ? ` · ${e.source} → ${e.dest}` : ''} — Chennai MTC map`);
@@ -1025,15 +1050,24 @@
 
   /* ── search: live buses by fleet number, above the routes and stops ── */
   $('q').addEventListener('input', () => {
-    const v = $('q').value.trim().toUpperCase().replace(/\s+/g, '');
+    // a fleet number or a route number, typed any way ("k 5660", "570s" finds P570S buses)
+    const key = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const v = key($('q').value);
     if (!on || v.length < 2 || !TRACK.size) return;
-    const hits = [...TRACK.keys()].filter(r => r.toUpperCase().includes(v)).sort().slice(0, 12);
+    const score = (reg, tr) => {
+      if (key(reg).includes(v)) return 0;
+      const sn = key(busSn(tr)), wsn = key(snOf(tr.v[1]));
+      if (wsn !== sn && (wsn === v || wsn.startsWith(v))) return 2;     // also findable by the working it runs on
+      return sn === v || sn.replace(/^[A-Z]+(?=\d)/, '') === v ? 1 : sn.startsWith(v) || sn.replace(/^[A-Z]+(?=\d)/, '').startsWith(v) ? 2 : -1;
+    };
+    const hits = [...TRACK.entries()].map(([r, tr]) => [score(r, tr), r]).filter(([s]) => s >= 0)
+      .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])).map(([, r]) => r).slice(0, 12);
     if (!hits.length) return;
     const box = $('results'), none = box.querySelector('.hint');
     if (none) none.remove();
     box.insertAdjacentHTML('afterbegin', '<div class="grp">Live buses</div>' + hits.map(r => {
       const tr = TRACK.get(r), f = codeFeat(tr.v[1]);
-      return `<div class="it" data-bus="${r}">${tagHTML(snOf(tr.v[1]), f && f.properties.category)}<span>Bus <b>${r}</b><div class="sub">${chips(tr.v[6])}${f ? '→ ' + (f.properties.destinatio || '') : ''}</div></span></div>`;
+      return `<div class="it" data-bus="${r}">${tagHTML(busSn(tr), f && f.properties.category)}<span>Bus <b>${r}</b><div class="sub">${chips(tr.v[6])}${f ? '→ ' + (f.properties.destinatio || '') : ''}</div></span></div>`;
     }).join(''));
     box.querySelectorAll('[data-bus]').forEach(el => el.addEventListener('click', () => {
       const tr = TRACK.get(el.dataset.bus); if (!tr) return;

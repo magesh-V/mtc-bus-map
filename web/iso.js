@@ -92,6 +92,22 @@ const BUSISO = (() => {
       g.fillStyle = v.stripe; g.fillRect(0, 15.6, W, 1.4);
       g.fillStyle = v.skirt; g.fillRect(0, 23, W, BOT - 23);
       if (v.panel && v.skirt !== v.body) { g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(0, 22.2, W, 0.8); }
+      if (v.word) {                                  // MTC Premium: black name panel and a white star sweeping back
+        g.fillStyle = v.mask; g.fillRect(14, 15.4, 34, 5.4);
+        g.fillStyle = '#ffffff'; g.font = '800 4.2px "Noto Sans", Arial, sans-serif'; g.textBaseline = 'middle';
+        g.fillText(v.word, 16, 18.2, 30);
+      }
+      if (v.star) {
+        g.strokeStyle = v.star; g.lineWidth = 0.7; g.beginPath();
+        const cx = 9, cy = 22.5, R = 4.2, r_ = 1.7;
+        for (let k = 0; k <= 10; k++) {
+          const a = -Math.PI / 2 + k * Math.PI / 5, rr_ = k % 2 ? r_ : R;
+          g[k ? 'lineTo' : 'moveTo'](cx + rr_ * Math.cos(a) * 1.25, cy + rr_ * Math.sin(a));
+        }
+        g.moveTo(cx + 5, cy - 0.4); g.lineTo(cx + 26, cy - 3.2);           // the sweep toward the front
+        g.moveTo(cx + 5, cy + 1); g.lineTo(cx + 22, cy - 0.8);
+        g.stroke();
+      }
       if (v.bolt) {
         g.fillStyle = v.bolt; g.beginPath();
         g.moveTo(18, 17.5); g.lineTo(12, 25.5); g.lineTo(16, 25.5); g.lineTo(13.5, 31); g.lineTo(21, 22.5); g.lineTo(17, 22.5); g.lineTo(20, 17.5); g.closePath(); g.fill();
@@ -140,6 +156,7 @@ const BUSISO = (() => {
       const W = WID * U, BOT = 28.5;
       rr(g, 0.3, 0.3, W - 0.6, BOT - 0.3, 2); g.fillStyle = v.body; g.fill();
       g.fillStyle = v.roof; g.fillRect(0.3, 0.3, W - 0.6, 2.2);
+      if (v.rearMask) { g.fillStyle = v.mask; g.fillRect(0.3, 2.5, W - 0.6, 16); }      // Premium: black upper rear
       g.fillStyle = v.glass; rr(g, 3, 4, W - 6, 8, 1); g.fill();
       g.fillStyle = v.skirt; g.fillRect(0.3, 23, W - 0.6, BOT - 23);
       g.fillStyle = '#e8403a'; rr(g, 1, 16, 2.4, 5, 0.6); g.fill(); rr(g, W - 3.4, 16, 2.4, 5, 0.6); g.fill();
