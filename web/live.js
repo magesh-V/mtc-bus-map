@@ -165,12 +165,36 @@
     if (tr.hold != null) { if (d < tr.hold) d = tr.hold; else tr.hold = null; }
     return d;
   }
+  /* Continuity. A new GPS fix moves where a bus "should" be; the drawn bus never
+     jumps to it. On its route it closes the gap smoothly (exponential catch-up,
+     so it briefly runs faster) and never moves backwards - if the new estimate is
+     behind, it waits for the estimate to come level. Off its route it glides from
+     where it was drawn to the new fix. */
+  const CATCH_S = 1.6, SNAP_M = 2500, GLIDE_S = 4;
+  function smoothD(tr, target, t) {
+    if (tr.disp == null || !isFinite(tr.disp)) { tr.disp = target; tr.dispT = t; return target; }
+    const dt = Math.max(0, Math.min(2, t - tr.dispT)), gap = target - tr.disp;
+    tr.dispT = t;
+    if (Math.abs(gap) > SNAP_M) tr.disp = target;
+    else if (gap > 0) tr.disp += gap * (1 - Math.exp(-dt / CATCH_S));
+    return tr.disp;
+  }
+  function glide(tr, t, out) {
+    out[0] = tr.v[3]; out[1] = tr.v[2]; out[2] = tr.v[4] || 0;
+    if (!tr.from) return out;
+    const u = Math.min(1, (t - tr.from[2]) / GLIDE_S);
+    if (u >= 1) { tr.from = null; return out; }
+    const e = u * u * (3 - 2 * u);
+    out[0] = tr.from[0] + (out[0] - tr.from[0]) * e; out[1] = tr.from[1] + (out[1] - tr.from[1]) * e;
+    return out;
+  }
   const _p = [0, 0, 0];
   function posOf(tr, t, out = _p) {
     if (!tr.ready) makeTrack(tr);
-    if (!tr.knots) { out[0] = tr.v[3]; out[1] = tr.v[2]; out[2] = tr.v[4] || 0; return out; }
-    tr.lastD = dOf(tr, t);
+    if (!tr.knots) { glide(tr, t, out); tr.shown = [out[0], out[1]]; return out; }
+    tr.lastD = smoothD(tr, dOf(tr, t), t);
     at(tr.g, tr.lastD, out);
+    tr.shown = [out[0], out[1]];
     return out;
   }
 
@@ -189,11 +213,16 @@
     for (const v of j.v) {
       const tr = { v, ready: false, g: null, knots: null, lastD: null, hold: null, moving: 0 };
       const old = prev.get(v[0]);
-      if (old && old.v[1] === v[1] && old.lastD != null) {
-        // same bus, same working, drawn before: keep it from jumping backwards
-        posOf(tr, t, [0, 0, 0]);
-        if (tr.knots && tr.lastD < old.lastD - 25 && old.lastD - tr.lastD < 1500) tr.hold = old.lastD;
+      if (old && old.v[1] === v[1] && old.disp != null) {
+        // same bus, same working, drawn before: carry on from where it is drawn
+        tr.disp = old.disp; tr.dispT = old.dispT;
         tr.moving = old.moving;
+      } else if (old && old.shown) {
+        tr.moving = old.moving;
+      }
+      if (old && old.shown) {
+        const dx = (old.shown[0] - v[3]) * K * Math.cos(v[2] * Math.PI / 180), dy = (old.shown[1] - v[2]) * K;
+        if (Math.hypot(dx, dy) > 3 && Math.hypot(dx, dy) < 3000) tr.from = [old.shown[0], old.shown[1], t];
       }
       TRACK.set(v[0], tr);
     }
@@ -351,7 +380,7 @@
       const prevD = tr.lastD;
       if (city && !tr.ready) {
         // city view: the GPS fix as-is — no route geometry built, nothing to animate
-        P3[0] = v[3]; P3[1] = v[2]; P3[2] = v[4] || 0;
+        glide(tr, t, P3); tr.shown = [P3[0], P3[1]];
         if (!fl0(v).includes('u')) tr.moving = t;
       } else posOf(tr, t, P3);
       const lng = P3[0], lat = P3[1], h = P3[2];

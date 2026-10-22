@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rider reports for the MTC map: how full a bus is, whether it kept time.
 
-    report_api.py --dir ~/projects/mtc-live/reports [--port 5063]
+    report_api.py --dir ~/projects/mtc-live/reports [--port 5063] [--bbox S,W,N,E]
 
     POST /api/report          {"kind", "value", "detail", "reg", "route", "sn", "stop", "stop_name", "lat", "lon"}
     GET  /api/recent?reg=K0038       reports on that bus, last 90 minutes
@@ -136,7 +136,8 @@ class H(BaseHTTPRequestHandler):
         for k in ('lat', 'lon'):
             try:
                 v = float(r.get(k))
-                if (12 < v < 14) if k == 'lat' else (79 < v < 81):
+                S, W, N, E = self.server.bbox
+                if (S < v < N) if k == 'lat' else (W < v < E):
                     rec[k] = round(v, 5)
             except (TypeError, ValueError):
                 pass
@@ -184,10 +185,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--dir', required=True)
     ap.add_argument('--port', type=int, default=5063)
+    ap.add_argument('--bbox', default='12,79,14,81', help='S,W,N,E a reported position must fall in (default Chennai)')
     a = ap.parse_args()
     os.makedirs(a.dir, exist_ok=True)
     s = ThreadingHTTPServer(('0.0.0.0', a.port), H)
     s.dir = a.dir
+    s.bbox = tuple(float(x) for x in a.bbox.split(','))
     s.serve_forever()
 
 
