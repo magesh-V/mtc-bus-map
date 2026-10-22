@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no, interactive-widget=resizes-content">
   <title>Chennai MTC Bus Explorer</title>
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Chennai MTC Buses">
@@ -76,8 +76,11 @@
     }
     @media (max-width: 699px) {
       /* the same idea, unrolling up from the bottom where a thumb can reach it */
-      #panel { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); top: auto;
-        max-height: 62vh; transform-origin: 50% 100%; transform: translateY(16px) scale(.97); }
+      /* --kb / --vvh (set from visualViewport in app.js) keep it above the on-screen
+         keyboard: lifted by the keyboard's height and no taller than what is left */
+      #panel { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom) + var(--kb, 0px)); top: auto;
+        max-height: min(62vh, calc(var(--vvh, 100vh) - 132px)); transform-origin: 50% 100%; transform: translateY(16px) scale(.97);
+        transition: transform .34s cubic-bezier(.32,.72,0,1), opacity .2s ease, bottom .18s ease, max-height .18s ease; }
     }
     #panel .ptop { padding: 12px; flex: 0 0 auto; -webkit-user-select: none; user-select: none; }
     #panel h1 { margin: 0 0 10px; font-size: 15px; font-weight: 800; letter-spacing: -.01em;
@@ -316,20 +319,21 @@
     /* A 24-hour dial rather than a bar chart: midnight at the top, noon at the
        bottom, each hour its own sector. A depot run reads instantly as two
        wedges at opposite ends of the face. */
-    .dnclock { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px 0 0; }
-    .dn { --c: #e09400; --soft: #fbe7bd; text-align: center; }
-    .dn.night { --c: #3d33a0; --soft: #d9d6f4; }
-    .dn svg { width: 100%; max-width: 168px; height: auto; overflow: visible; }
+    .dnclock { padding: 4px 0 0; text-align: center; }
+    .dn1 svg { width: 100%; max-width: 230px; height: auto; overflow: visible; }
     .dn-face { fill: none; stroke: rgba(0,0,0,.08); stroke-dasharray: 2 3; }
     .dn-tick { stroke: var(--muted); stroke-width: 1; opacity: .5; }
-    .dn-w { fill: var(--c); opacity: .92; }
-    .dn-w.z { fill: var(--soft); opacity: .7; }
+    .dn-split { stroke: rgba(0,0,0,.14); stroke-width: 1; stroke-dasharray: 2 2; }
+    .dn-w { opacity: .92; } .dn-w.dy { fill: #e09400; } .dn-w.nt { fill: #3d33a0; }
+    .dn-w.z.dy { fill: #fbe7bd; opacity: .7; } .dn-w.z.nt { fill: #d9d6f4; opacity: .7; }
     .dn-w:hover { opacity: 1; stroke: var(--ink); stroke-width: .8; }
     .dn-num { fill: var(--muted); font-size: 9px; font-weight: 700; text-anchor: middle; }
-    .dn-hub { fill: #fff; stroke: var(--soft); stroke-width: 1.5; }
-    .dn-ic { fill: none; stroke: var(--c); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    .dn-cap { font-size: 11.5px; color: var(--muted); line-height: 1.35; margin-top: -2px; }
-    .dn-cap b { color: var(--c); font-weight: 800; margin-right: 3px; }
+    .dn-hub { fill: #fff; stroke: #e8e2d4; stroke-width: 1.5; }
+    .dn-ic { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .dn-ic.day { stroke: #e09400; } .dn-ic.night { stroke: #3d33a0; }
+    .dn-caps { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
+    .dn-cap { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+    .dn-cap b { font-weight: 800; margin-right: 3px; } .dn-cap.day b { color: #e09400; } .dn-cap.night b { color: #3d33a0; }
     .dn-cap span { display: block; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
     .dn-peak { text-align: center; font-size: 11.5px; color: var(--muted); padding: 8px 0 2px; }
     .dn-peak b { color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -416,7 +420,7 @@
     <div class="ptop">
       <h1>Chennai MTC Buses</h1>
       <div id="searchbox">
-        <input id="q" type="search" placeholder="Search a route or a stop…" autocomplete="off">
+        <input id="q" type="search" placeholder="Route, stop or bus number…" autocomplete="off">
         <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
       </div>
     </div>
@@ -432,10 +436,10 @@
     <div class="cscroll" id="card-body"></div>
   </div>
 
-  <script src="app.js?v=38"></script>
+  <script src="app.js?v=40"></script>
   <script src="buses.js?v=4"></script>
   <script src="iso.js?v=3"></script>
-  <script src="live.js?v=24"></script>
+  <script src="live.js?v=25"></script>
   <script src="traffic.js?v=2"></script>
 </body>
 

@@ -1083,21 +1083,27 @@
     const key = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const v = key($('q').value);
     if (!on || v.length < 2 || !TRACK.size) return;
+    // the route number typed exactly comes first, then the fleet number typed exactly;
+    // a fleet number that merely contains the digits ("534" in DL1PD4534) comes last
     const score = (reg, tr) => {
-      if (key(reg).includes(v)) return 0;
-      const sn = key(busSn(tr)), wsn = key(snOf(tr.v[1]));
-      if (wsn !== sn && (wsn === v || wsn.startsWith(v))) return 2;     // also findable by the working it runs on
-      return sn === v || sn.replace(/^[A-Z]+(?=\d)/, '') === v ? 1 : sn.startsWith(v) || sn.replace(/^[A-Z]+(?=\d)/, '').startsWith(v) ? 2 : -1;
+      const r = key(reg), sn = key(busSn(tr)), wsn = key(snOf(tr.v[1])), bare = x => x.replace(/^[A-Z]+(?=\d)/, '');
+      if (sn === v || bare(sn) === v || wsn === v) return 0;
+      if (r === v || r.endsWith(v) && v.length >= 4) return 1;
+      if (sn.startsWith(v) || bare(sn).startsWith(v) || wsn.startsWith(v)) return 2;
+      return r.includes(v) ? 3 : -1;
     };
     const hits = [...TRACK.entries()].map(([r, tr]) => [score(r, tr), r]).filter(([s]) => s >= 0)
       .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])).map(([, r]) => r).slice(0, 12);
     if (!hits.length) return;
     const box = $('results'), none = box.querySelector('.hint');
     if (none) none.remove();
-    box.insertAdjacentHTML('afterbegin', '<div class="grp">Live buses</div>' + hits.map(r => {
+    // below the routes (what most people search for), above the stops
+    const stopsGrp = [...box.querySelectorAll('.grp')].find(g => /Stops/.test(g.textContent));
+    const html = '<div class="grp">Live buses</div>' + hits.map(r => {
       const tr = TRACK.get(r), f = codeFeat(tr.v[1]);
       return `<div class="it" data-bus="${r}">${tagHTML(busSn(tr), f && f.properties.category)}<span>Bus <b>${r}</b><div class="sub">${chips(tr.v[6])}${f ? '→ ' + (f.properties.destinatio || '') : ''}</div></span></div>`;
-    }).join(''));
+    }).join('');
+    if (stopsGrp) stopsGrp.insertAdjacentHTML('beforebegin', html); else box.insertAdjacentHTML('beforeend', html);
     box.querySelectorAll('[data-bus]').forEach(el => el.addEventListener('click', () => {
       const tr = TRACK.get(el.dataset.bus); if (!tr) return;
       openBus(el.dataset.bus);

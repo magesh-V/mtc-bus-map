@@ -558,61 +558,65 @@ function dayShape(h) {
   return '';
 }
 
-/* Departures on two 12-hour dials, day and night — the same reading as the
-   Chennai stats clocks. Day runs 6 am to 6 pm, night 6 pm to 6 am, each half
-   filling one ordinary clock face, so 08:00 sits where 8 sits on any clock.
-   One wedge an hour, area-true (radius by square root) and on one scale across
-   both faces, so a depot run still reads as a pair of wedges with nothing
-   between them, and a night service shows up on the night face. */
+/* Departures on one 24-hour dial, split into day and night. 06:00 sits at the
+   top and the day runs clockwise down the right half to 18:00 at the bottom; the
+   night fills the left half back up to 06:00 - the sun on the right of the hub,
+   the moon on the left, each half washed in its own sky. One wedge an hour,
+   area-true (radius by square root) on one scale, so a depot run still reads as
+   a pair of wedges with nothing between them and a night service shows up on
+   the left. */
 let dnSeq = 0;
 const SUN_ICON = '<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/><circle cx="12" cy="12" r="4"/>';
 const MOON_ICON = '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>';
 function hoursClock(h) {
   const tot = h.reduce((a, b) => a + b, 0), max = Math.max(...h, 1);
   const id = 'dn' + (++dnSeq);
-  const dial = (night) => {
-    const cx = 80, cy = 80, R = 58, r0 = 19;
-    const hours = night ? [18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5] : [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
-    const pol = (pos, r) => { const a = pos / 12 * 2 * Math.PI - Math.PI / 2; return [(cx + r * Math.cos(a)).toFixed(2), (cy + r * Math.sin(a)).toFixed(2)]; };
-    const rad = n => r0 + 3 + (R - r0 - 3) * Math.sqrt(n / max);
-    const wedge = (p0, p1, r1) => {
-      const [a, b] = pol(p0, r1), [c, d] = pol(p1, r1), [e, f] = pol(p1, r0), [g, k] = pol(p0, r0);
-      return `M${a} ${b}A${r1} ${r1} 0 0 1 ${c} ${d}L${e} ${f}A${r0} ${r0} 0 0 0 ${g} ${k}Z`;
-    };
-    const wedges = hours.map(hr => {
-      const n = h[hr] || 0, pos = hr % 12;
-      const hh = String(hr).padStart(2, '0');
-      return `<path class="dn-w${n ? '' : ' z'}" d="${wedge(pos + .05, pos + .95, n ? rad(n) : r0 + 2)}">`
-           + `<title>${hh}:00–${String((hr + 1) % 24).padStart(2, '0')}:00 — ${n} departure${n === 1 ? '' : 's'}</title></path>`;
-    }).join('');
-    const nums = [[0, '12'], [3, '3'], [6, '6'], [9, '9']].map(([q, l]) => {
-      const [x, y] = pol(q, R + 11); return `<text class="dn-num" x="${x}" y="${(+y + 3).toFixed(2)}">${l}</text>`;
-    }).join('');
-    const ticks = Array.from({ length: 12 }, (_, q) => { const [x1, y1] = pol(q, R + 4), [x2, y2] = pol(q, R + 1); return `<line class="dn-tick" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`; }).join('');
-    // a soft watercolour sun or moon behind the face sets the scene without competing with data
-    const sky = night
-      ? `<circle cx="${cx - 3}" cy="${cy + 2}" r="${R * .64}" fill="url(#${id}m)" mask="url(#${id}k)"/>`
-        + [[.55, -.55, 2.4], [.72, .12, 1.6], [.36, .64, 1.9], [-.62, -.6, 1.6], [.14, -.84, 1.3]].map(([x, y, r]) => `<circle cx="${cx + x * R}" cy="${cy + y * R}" r="${r}" fill="#c9ccff"/>`).join('')
-      : Array.from({ length: 12 }, (_, k) => { const a = k / 12 * 2 * Math.PI + .13, b = .11, P = (r, t) => `${(cx + r * Math.cos(t)).toFixed(1)},${(cy + r * Math.sin(t)).toFixed(1)}`;
-          return `<path d="M${P(R * .62, a - b)}L${P(R * .98, a)}L${P(R * .62, a + b)}Z" fill="#f6ad2b" opacity=".7"/>`; }).join('')
-        + `<circle cx="${cx}" cy="${cy}" r="${R * .6}" fill="url(#${id}s)"/>`;
-    const n = hours.reduce((a, hr) => a + (h[hr] || 0), 0);
-    return `<div class="dn ${night ? 'night' : 'day'}"><svg viewBox="0 0 160 160" role="img" aria-label="${night ? 'Night' : 'Day'} departures by hour">`
-      + `<g filter="url(#${id}f)" opacity="${night ? .5 : .42}">${sky}</g>`
-      + `<circle class="dn-face" cx="${cx}" cy="${cy}" r="${R}"/>` + ticks + wedges + nums
-      + `<circle class="dn-hub" cx="${cx}" cy="${cy}" r="${r0 - 2}"/>`
-      + `<svg x="${cx - 8}" y="${cy - 8}" width="16" height="16" viewBox="0 0 24 24" class="dn-ic">${night ? MOON_ICON : SUN_ICON}</svg>`
-      + `</svg><div class="dn-cap"><b>${night ? 'Night' : 'Day'}</b> ${night ? '6 pm – 6 am' : '6 am – 6 pm'}`
-      + `<span>${n} trip${n === 1 ? '' : 's'}${tot ? ` · ${Math.round(100 * n / tot)}%` : ''}</span></div></div>`;
+  const cx = 100, cy = 100, R = 74, r0 = 24;
+  const pol = (pos, r) => { const a = pos / 24 * 2 * Math.PI - Math.PI / 2; return [(cx + r * Math.cos(a)).toFixed(2), (cy + r * Math.sin(a)).toFixed(2)]; };
+  const posOf = hr => (hr - 6 + 24) % 24;                      // 06:00 at the top, clockwise
+  const rad = n => r0 + 3 + (R - r0 - 3) * Math.sqrt(n / max);
+  const wedge = (p0, p1, r1) => {
+    const [a, b] = pol(p0, r1), [c, d] = pol(p1, r1), [e, f] = pol(p1, r0), [g, k] = pol(p0, r0);
+    return `M${a} ${b}A${r1} ${r1} 0 0 1 ${c} ${d}L${e} ${f}A${r0} ${r0} 0 0 0 ${g} ${k}Z`;
   };
-  const defs = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>`
+  const wedges = Array.from({ length: 24 }, (_, hr) => {
+    const n = h[hr] || 0, pos = posOf(hr), night = hr < 6 || hr >= 18;
+    const hh = String(hr).padStart(2, '0');
+    return `<path class="dn-w ${night ? 'nt' : 'dy'}${n ? '' : ' z'}" d="${wedge(pos + .06, pos + .94, n ? rad(n) : r0 + 2)}">`
+         + `<title>${hh}:00–${String((hr + 1) % 24).padStart(2, '0')}:00 — ${n} departure${n === 1 ? '' : 's'}</title></path>`;
+  }).join('');
+  const nums = [[6, '06'], [12, '12'], [18, '18'], [0, '00']].map(([hr, l]) => {
+    const [x, y] = pol(posOf(hr), R + 12); return `<text class="dn-num" x="${x}" y="${(+y + 3).toFixed(2)}">${l}</text>`;
+  }).join('');
+  const ticks = Array.from({ length: 24 }, (_, q) => { const [x1, y1] = pol(q, R + (q % 3 ? 2.5 : 5)), [x2, y2] = pol(q, R + 1); return `<line class="dn-tick" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`; }).join('');
+  // the two skies: a soft sun on the right half, moon and stars on the left
+  const sun = Array.from({ length: 9 }, (_, k) => { const a = -Math.PI / 2 + (k + .5) / 9 * Math.PI, b = .1, P = (r, t) => `${(cx + r * Math.cos(t)).toFixed(1)},${(cy + r * Math.sin(t)).toFixed(1)}`;
+      return `<path d="M${P(R * .6, a - b)}L${P(R * .97, a)}L${P(R * .6, a + b)}Z" fill="#f6ad2b" opacity=".7"/>`; }).join('')
+    + `<circle cx="${cx + R * .3}" cy="${cy}" r="${R * .5}" fill="url(#${id}s)"/>`;
+  const moon = `<circle cx="${cx - R * .3}" cy="${cy + 2}" r="${R * .46}" fill="url(#${id}m)" mask="url(#${id}k)"/>`
+    + [[-.55, -.6, 2.4], [-.78, .1, 1.6], [-.4, .66, 1.9], [-.2, -.82, 1.3], [-.84, -.32, 1.2]].map(([x, y, r]) => `<circle cx="${cx + x * R}" cy="${cy + y * R}" r="${r}" fill="#c9ccff"/>`).join('');
+  const defs = `<defs>`
     + `<filter id="${id}f" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="3" seed="${dnSeq * 7}" result="n"/>`
     + `<feDisplacementMap in="SourceGraphic" in2="n" scale="6" xChannelSelector="R" yChannelSelector="G" result="d"/><feGaussianBlur in="d" stdDeviation=".7"/></filter>`
     + `<radialGradient id="${id}s" cx="45%" cy="42%" r="60%"><stop offset="0" stop-color="#ffe28a"/><stop offset=".55" stop-color="#f7b733"/><stop offset="1" stop-color="#f08c1a" stop-opacity=".2"/></radialGradient>`
     + `<radialGradient id="${id}m" cx="40%" cy="38%" r="65%"><stop offset="0" stop-color="#eef0ff"/><stop offset=".6" stop-color="#b9bdf2"/><stop offset="1" stop-color="#7f86d8" stop-opacity=".25"/></radialGradient>`
-    + `<mask id="${id}k"><rect width="160" height="160" fill="#fff"/><circle cx="${80 + 58 * .24}" cy="${80 - 58 * .16}" r="${58 * .5}" fill="#000"/></mask></defs></svg>`;
+    + `<mask id="${id}k"><rect width="200" height="200" fill="#fff"/><circle cx="${cx - R * .3 + R * .2}" cy="${cy - R * .12}" r="${R * .38}" fill="#000"/></mask>`
+    + `<clipPath id="${id}r"><rect x="${cx}" y="0" width="${cx}" height="200"/></clipPath><clipPath id="${id}l"><rect x="0" y="0" width="${cx}" height="200"/></clipPath></defs>`;
+  const dayN = h.reduce((a, n, hr) => a + (hr >= 6 && hr < 18 ? n : 0), 0), nightN = tot - dayN;
+  const pct = n => tot ? ` · ${Math.round(100 * n / tot)}%` : '';
+  const svg = `<svg viewBox="0 0 200 200" role="img" aria-label="Departures by hour, day on the right and night on the left">${defs}`
+    + `<g filter="url(#${id}f)" opacity=".45"><g clip-path="url(#${id}r)">${sun}</g><g clip-path="url(#${id}l)">${moon}</g></g>`
+    + `<circle class="dn-face" cx="${cx}" cy="${cy}" r="${R}"/>` + ticks + wedges + nums
+    + `<line class="dn-split" x1="${cx}" y1="${cy - R - 3}" x2="${cx}" y2="${cy + R + 3}"/>`
+    + `<circle class="dn-hub" cx="${cx}" cy="${cy}" r="${r0 - 2}"/>`
+    + `<line class="dn-split" x1="${cx}" y1="${cy - r0 + 4}" x2="${cx}" y2="${cy + r0 - 4}"/>`
+    + `<svg x="${cx + 3}" y="${cy - 7}" width="14" height="14" viewBox="0 0 24 24" class="dn-ic day">${SUN_ICON}</svg>`
+    + `<svg x="${cx - 17}" y="${cy - 7}" width="14" height="14" viewBox="0 0 24 24" class="dn-ic night">${MOON_ICON}</svg>`
+    + `</svg>`;
   const peak = h.indexOf(max);
-  return `<div class="dnclock">${defs}${dial(false)}${dial(true)}</div>`
+  return `<div class="dnclock"><div class="dn1">${svg}</div>`
+    + `<div class="dn-caps"><div class="dn-cap night"><b>Night</b> 6 pm – 6 am<span>${nightN} trip${nightN === 1 ? '' : 's'}${pct(nightN)}</span></div>`
+    + `<div class="dn-cap day"><b>Day</b> 6 am – 6 pm<span>${dayN} trip${dayN === 1 ? '' : 's'}${pct(dayN)}</span></div></div></div>`
     + (tot ? `<div class="dn-peak">Busiest hour <b>${String(peak).padStart(2, '0')}:00–${String((peak + 1) % 24).padStart(2, '0')}:00</b> · ${max} departure${max === 1 ? '' : 's'}</div>` : '');
 }
 
@@ -731,9 +735,24 @@ function openTerminus(f) {
   else map.flyTo({ center: c, zoom: Math.max(map.getZoom(), 14), duration: 650 });
 }
 
+/* ── on-screen keyboard: keep the search card above it ──
+   On phones the card sits at the bottom of the screen, which is exactly where the
+   keyboard opens, so typing went on out of sight. visualViewport says how much of
+   the window the keyboard covers; the card is lifted by that much and capped to
+   the height that is left. */
+(() => {
+  const vv = window.visualViewport; if (!vv) return;
+  const fit = () => {
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty('--kb', (kb > 60 ? kb : 0) + 'px');
+    document.documentElement.style.setProperty('--vvh', vv.height + 'px');
+  };
+  vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); fit();
+})();
+
 /* ── search ── */
 const rkey = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-function renderHint() { $('results').innerHTML = '<div class="hint">Type a route number (e.g. <b>5B</b>, <b>21G</b>, <b>M1</b>) , a stop name (e.g. <b>Adyar</b>) or a bus number (e.g. <b>K5657</b>). Or explore the map — tap a stop for its buses, tap a line to trace a route.</div>'; }
+function renderHint() { $('results').innerHTML = '<div class="hint">Type a route number (e.g. <b>5B</b>, <b>21G</b>, <b>M1</b>), a stop name (e.g. <b>Adyar</b>) or a bus number (e.g. <b>K5657</b>). Or explore the map — tap a stop for its buses, tap a line to trace a route.</div>'; }
 renderHint();
 $('q').addEventListener('input', () => {
   const v = $('q').value.trim().toLowerCase();
