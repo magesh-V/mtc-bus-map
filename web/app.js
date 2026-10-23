@@ -177,8 +177,9 @@ map.on('style.load', () => {   // 'load' waits on basemap tiles that never settl
 
   // interactions
   const ptr = id => { map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer'); map.on('mouseleave', id, () => map.getCanvas().style.cursor = ''); };
-  // a live bus or an observed-speed segment drawn on top takes the click (live.js, traffic.js)
-  const underBus = e => (window.liveBusAt && window.liveBusAt(e.point)) || (window.trafficAt && window.trafficAt(e.point));
+  // a live bus, an observed-speed segment or a metro train drawn on top takes the click (live.js, traffic.js, trains.js)
+  const underBus = e => (window.liveBusAt && window.liveBusAt(e.point)) || (window.trafficAt && window.trafficAt(e.point))
+    || (window.trainAt && window.trainAt(e.point));
   map.on('click', 'stops', e => { if (!underBus(e)) openStop(e.features[0]); }); ptr('stops');
   const pickFeature = e => {
     if (underBus(e)) return;
@@ -223,7 +224,7 @@ function loadData() {
     });
     map.getSource('routes').setData(fc);
   });
-  fetch(`${DATA}/metro_map.geojson`).then(r => r.json()).then(fc => map.getSource('metro').setData(fc));
+  fetch(`${DATA}/metro_map.geojson?v=${DATA_V}`).then(r => r.json()).then(fc => map.getSource('metro').setData(fc));
   fetch(`${DATA}/bus_termini.geojson?v=${DATA_V}`).then(r => r.json()).then(fc => {
     TERMINI_FC = fc;                          // lazy viewport-based pin rendering
     map.on('moveend', renderTermini);

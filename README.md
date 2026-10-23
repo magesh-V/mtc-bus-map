@@ -18,6 +18,7 @@ are MTC's own published stage table.
 | **Routes** | 970 MTC services over 3,713 scheduled workings, each road-matched (OSRM over OpenStreetMap). Tap a line for its workings, stops and timings. |
 | **Departures by hour** | Two 12-hour dials per working: day (6 am–6 pm) and night (6 pm–6 am). |
 | **Live buses** | Every bus the MTC app is tracking, as a 3D model in its real livery — Switch EiV12 electric AC (red) and non-AC (cyan/purple), standard-floor diesel (sky blue), diesel AC, premium — glowing while it moves, a snowflake over AC buses, passengers behind the glass at the estimated crowd level. Drawn on a WebGL layer, only for buses in view. Between GPS fixes each bus moves along its route on estimated stop times (its distance to each stop at city bus speed); it never leaves before it must and is never drawn going backwards. |
+| **Metro trains (timetable)** | Every CMRL Metro train where its timetable puts it now, drawn as a small train that faces its way of travel, moving between stations and waiting at platforms; tap one for its line, destination and next station. The 41 metro stations are drawn too; tap one for its next three trains each way. Labelled as the timetable, not live tracking: no one publishes live train positions in Chennai. `web/trains.js`, data from `pipeline/build_metro_trains.py`. |
 | **Live arrivals** | Every stop card lists the tracked buses due in the next 90 minutes; low-floor buses carry a wheelchair ramp pill. Tap a next stop on a bus card to fly there. |
 | **Watching a route** | While a rider has a bus or a route open, the page tells the server once a minute (`POST /api/watch`, route number only) and polls every 10 s; the collector polls watched routes every 30 s instead of once a cycle, at most 16 route variants at once, so the extra load on the source is capped however many riders watch. |
 | **Rider reports** | A Report button on bus and stop cards: how full, on time or not, did the ramp work — a few taps, no typing. Served by `server/report_api.py` (`server/mtc-reports.sh`); fixed answers only, no free text, IP addresses never stored. |
@@ -34,6 +35,7 @@ web/       the app as served (MapLibre GL, no build step)
   db/index.html            the dashboard (data.json is generated on the server)
   live.js                  live buses + live arrivals
   traffic.js               observed-speed layer
+  trains.js                metro trains from the CMRL timetable (not live)
   data/                    routes, stops, timings, segment geometry (see below)
 server/    runs on the web host
   chalo_collector.py       live buses from the MTC app's feed (Chalo), route variant by variant;
@@ -103,7 +105,8 @@ Serve `web/` with any static server. To rebuild for a new network snapshot: harv
 `mtc_routes.geojson` (route lines), `route_stops.json` (stops per working, keyed by route code),
 `timings.json` (first/last/frequency/hourly departures per working), `bus_stops.geojson`,
 `bus_termini.geojson`, `metro_lines.geojson` (one shape per rail trip, read back by the GTFS
-build), `metro_map.geojson` (its distinct shapes, what the map draws), `metro_stations.geojson`, `stop_dist.json`
+build), `metro_map.geojson` (its distinct shapes, what the map draws), `metro_trains.json` (every
+metro train's stations, times and distance along its track), `metro_stations.geojson`, `stop_dist.json`
 (each stop's distance along its route), `seg_geo.json` (stop-to-stop road segments).
 Built from the Chennai One network snapshot of 17 October 2026.
 
